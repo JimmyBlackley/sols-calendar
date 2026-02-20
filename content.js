@@ -1,5 +1,5 @@
 /**
- * Content script for SOLSS Timetable to ICS Chrome Extension.
+ * Content script for SOLS Timetable to ICS Chrome Extension.
  * Parses the mobile list view of the "My Timetable" page.
  */
 
@@ -11,7 +11,7 @@ function parseTimetable() {
     const events = [];
     const mobileView = document.querySelector('#mobile-version');
     if (!mobileView) {
-        console.error('SOLSS-Cal: Could not find #mobile-version element');
+        console.error('SOLS-Cal: Could not find #mobile-version element');
         return events;
     }
 
@@ -146,24 +146,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'generateICS') {
         const ics = generateICS(request.events, request.year);
         sendResponse({ ics });
-    } else if (request.action === 'downloadICS') {
-        // Inject into page's main world so the blob URL is page-scoped
-        // (content script blob URLs are extension-scoped and downloads break)
-        const script = document.createElement('script');
-        script.textContent = `(function() {
-            var blob = new Blob([${JSON.stringify(request.icsContent)}], {type: 'text/calendar'});
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = ${JSON.stringify(request.filename || 'UOW_class_timetable.ics')};
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
-        })();`;
-        document.documentElement.appendChild(script);
-        script.remove();
-        sendResponse({ success: true });
     }
     return true;
 });

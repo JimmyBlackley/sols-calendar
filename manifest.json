@@ -1,17 +1,14 @@
 {
     "manifest_version": 3,
-    "name": "SOLSS Timetable to ICS",
+    "name": "SOLS Timetable to ICS",
     "version": "1.0.0",
-    "description": "Export your UOW SOLSS timetable to an ICS calendar file",
+    "description": "Export your UOW SOLS timetable to an ICS calendar file",
     "permissions": [
         "activeTab",
         "downloads"
     ],
     "action": {
         "default_popup": "popup.html"
-    },
-    "background": {
-        "service_worker": "background.js"
     },
     "content_scripts": [
         {

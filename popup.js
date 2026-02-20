@@ -1,5 +1,5 @@
 /**
- * Popup script for SOLSS Timetable to ICS Chrome Extension.
+ * Popup script for SOLS Timetable to ICS Chrome Extension.
  * Sends a message to the content script → receives events → generates ICS → downloads.
  */
 
@@ -22,7 +22,7 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
 
         // Check if we're on the right page
         if (!tab.url.includes('solss.uow.edu.au')) {
-            throw new Error('Please navigate to your SOLSS My Timetable page first');
+            throw new Error('Please navigate to your SOLS My Timetable page first');
         }
 
         // Send message to content script to parse the timetable
@@ -62,7 +62,7 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
         status.className = 'status success';
         status.textContent = `✓ Exported ${response.events.length} classes!`;
     } catch (err) {
-        console.error('SOLSS-Cal export error:', err);
+        console.error('SOLS-Cal export error:', err);
         status.className = 'status error';
         status.textContent = `✗ ${err.message}`;
     } finally {

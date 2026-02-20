@@ -165,7 +165,7 @@ function generateICS(events, year) {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//SOLSS Timetable to ICS//EN',
+        'PRODID:-//SOLS Timetable to ICS//EN',
         'CALSCALE:GREGORIAN',
         'METHOD:PUBLISH',
         'X-WR-CALNAME:UOW Timetable',
@@ -212,7 +212,7 @@ function generateICS(events, year) {
                 const description = `${event.type} - ${event.subjectCode}\\n${event.activityDetail || event.activityType}\\nWeek ${week}`;
 
                 lines.push('BEGIN:VEVENT');
-                lines.push(`UID:${generateUID()}@solss-cal`);
+                lines.push(`UID:${generateUID()}@sols-cal`);
                 lines.push(`DTSTAMP:${dtstamp}`);
                 lines.push(foldLine(`DTSTART;TZID=Australia/Sydney:${dtstart}`));
                 lines.push(foldLine(`DTEND;TZID=Australia/Sydney:${dtend}`));
