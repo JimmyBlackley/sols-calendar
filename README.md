@@ -1,14 +1,32 @@
 # 📅 SOLS Timetable → ICS
 
-A Chrome extension that exports your UOW class timetable to an `.ics` calendar file.
+A browser extension that exports your UOW SOLS timetable to an `.ics` calendar file. Works on **Chrome**, **Edge**, and **Firefox**.
 
 ## Install
 
-1. Clone or download this repo
-2. Open **chrome://extensions** in Chrome
-3. Enable **Developer mode** (toggle in the top right)
-4. Click **Load unpacked**
-5. Select this folder
+### Step 1 — Download the extension
+
+1. Go to the [GitHub repo page](https://github.com/JimmyBlackley/sols-calendar)
+2. Click the green **Code** button near the top right
+3. Click **Download ZIP**
+4. Unzip the downloaded file — you'll get a folder called `sols-calendar-main` (keep this somewhere permanent, don't delete it)
+
+### Step 2a — Chrome / Edge
+
+1. Open your browser and go to `chrome://extensions` (Chrome) or `edge://extensions` (Edge)
+2. Turn on **Developer mode** (toggle in the top-right corner)
+3. Click **Load unpacked**
+4. Navigate into the unzipped folder and select the **`chromium`** subfolder
+5. The extension icon should now appear in your toolbar
+
+### Step 2b — Firefox
+
+1. Open Firefox and go to `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on…**
+3. Navigate into the unzipped folder, open the **`firefox`** subfolder, and select the **`manifest.json`** file
+4. The extension icon should now appear in your toolbar
+
+> **Note:** Temporary add-ons in Firefox are removed when you close the browser. You'll need to reload it each session until the extension is published on [addons.mozilla.org](https://addons.mozilla.org).
 
 ## Use
 
