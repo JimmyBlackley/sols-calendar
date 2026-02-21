@@ -10,11 +10,17 @@
         "downloads"
     ],
     "icons": {
-        "64": "solscal.svg"
+        "32": "solscal32.png",
+        "64": "solscal64.png",
+        "128": "solscal128.png"
     },
     "action": {
         "default_popup": "popup.html",
-        "default_icon": "solscal.svg"
+        "default_icon": {
+            "32": "solscal32.png",
+            "64": "solscal64.png",
+            "128": "solscal128.png"
+        }
     },
     "content_scripts": [
         {
