@@ -16,8 +16,12 @@
         "activeTab",
         "downloads"
     ],
+    "icons": {
+        "64": "solscal.svg"
+    },
     "action": {
-        "default_popup": "popup.html"
+        "default_popup": "popup.html",
+        "default_icon": "solscal.svg"
     },
     "content_scripts": [
         {
