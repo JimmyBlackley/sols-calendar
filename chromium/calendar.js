@@ -5,6 +5,7 @@
  * Annual sessions simply span both semesters:
  *   weeks 1-13 use the Autumn calendar, weeks 14+ use Spring
  *   (week 14 = Spring week 1).
+ *  Hardcoded dates for 2026 at the moment. TODO: make this dynamic.
  */
 
 const ACADEMIC_CALENDAR = {

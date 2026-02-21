@@ -134,7 +134,13 @@ function detectSession(subjectCode) {
     // Also check mobile view
     const mobileItems = document.querySelectorAll('#mobile-version .list-group-item p.list-group-item-text');
     // The mobile view doesn't explicitly show the session, but the desktop does
-    // If we still haven't found it, default to Autumn
+    // If we still haven't found it, just use the date
+    // ignore the current year, we only need the month for session:
+    const now = new Date(); 
+    const month = now.getMonth();
+    if (month >= 5 && month <= 11) {
+        return 'Spring';
+    }
     return 'Autumn';
 }
 

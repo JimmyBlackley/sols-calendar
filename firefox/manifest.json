@@ -1,0 +1,33 @@
+{
+    "manifest_version": 3,
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "sols-calendar@jimmyblackley",
+            "strict_min_version": "109.0"
+        }
+    },
+    "name": "SOLS Timetable to ICS",
+    "short_name": "SOLS Calendar",
+    "version": "1.0.0",
+    "author": "James Blackley",
+    "description": "Export your UOW SOLS timetable to an ICS calendar file",
+    "homepage_url": "https://github.com/JimmyBlackley/sols-calendar",
+    "permissions": [
+        "activeTab",
+        "downloads"
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*"
+            ],
+            "js": [
+                "calendar.js",
+                "content.js"
+            ]
+        }
+    ]
+}
