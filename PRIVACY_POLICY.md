@@ -1,6 +1,6 @@
 # Privacy Policy — SOLS Timetable to ICS
 
-**Last updated:** 24 February 2026
+**Last updated:** 26 February 2026
 
 ## Overview
 
@@ -24,7 +24,7 @@ All collected timetable data is used **solely** to generate an ICS calendar file
 
 - Data is parsed from the page DOM in real time when the user clicks "Export to ICS."
 - The parsed data is converted into ICS format entirely within the browser.
-- The resulting `.ics` file is saved directly to the user's device via the browser's native save dialog.
+- The resulting `.ics` file is saved directly to the user's device via the browser's native "Save As" dialog using the `chrome.downloads` API. No files are downloaded from any external source.
 - **No data is stored, cached, or persisted** by the Extension after the export is complete.
 
 ## Data Sharing
@@ -40,6 +40,7 @@ Because all data processing happens locally within the browser and no data is tr
 | Permission | Purpose |
 |---|---|
 | `activeTab` | Access the current SOLS timetable page when the user clicks the extension icon, to read class information from the page. |
+| `downloads` | Save the generated ICS calendar file to the user's device via a native "Save As" dialog. No files are downloaded from external sources. |
 | Host access to `solss.uow.edu.au` | Run content scripts on the SOLS timetable page to parse the timetable HTML. |
 
 ## Limited Use Disclosure

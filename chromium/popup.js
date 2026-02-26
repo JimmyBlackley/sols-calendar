@@ -47,17 +47,15 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
             throw new Error('Failed to generate ICS file');
         }
 
-        // Use File System Access API for a native save dialog
-        const fileHandle = await window.showSaveFilePicker({
-            suggestedName: 'UOW_class_timetable.ics',
-            types: [{
-                description: 'iCalendar File',
-                accept: { 'text/calendar': ['.ics'] }
-            }]
+        // Create a blob and download via chrome.downloads API
+        const blob = new Blob([icsResponse.ics], { type: 'text/calendar' });
+        const url = URL.createObjectURL(blob);
+        await chrome.downloads.download({
+            url: url,
+            filename: 'UOW_class_timetable.ics',
+            saveAs: true
         });
-        const writable = await fileHandle.createWritable();
-        await writable.write(icsResponse.ics);
-        await writable.close();
+        URL.revokeObjectURL(url);
 
         status.className = 'status success';
         status.textContent = `✓ Exported ${response.events.length} classes!`;
