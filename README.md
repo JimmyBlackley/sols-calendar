@@ -27,6 +27,9 @@ page-embedded export flow through Tampermonkey.
 
 ### Step 2b — Firefox
 
+Firefox 127 or later is required so the Manifest V3 host permissions needed for
+the automatic public Key Dates request are granted during installation.
+
 1. Open Firefox and go to `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on…**
 3. Navigate into the unzipped folder, open the **`firefox`** subfolder, and select the **`manifest.json`** file
@@ -79,10 +82,13 @@ instructions.
 
 ## Academic calendar dates
 
-When the exact SOLS My Timetable document loads, each browser extension and the
-Tampermonkey userscript automatically makes one fixed `GET` request to
-`https://www.uow.edu.au/student/dates/`. This lets the academic-year selector
-be ready without a separate click.
+When the exact SOLS My Timetable document begins loading, each browser extension
+and the Tampermonkey userscript automatically makes one fixed `GET` request to
+`https://www.uow.edu.au/student/dates/`. The request starts at
+`document_start`, before timetable DOM discovery and without a click. The
+userscript panel consumes that same pending or completed result when SOLS adds
+the timetable, then replaces its loading option with the published numeric
+years automatically.
 
 The request does not contain timetable data, a student number, the selected
 year, or other query data. Request credentials and cookies are omitted. As with

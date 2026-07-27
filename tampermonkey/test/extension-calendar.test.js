@@ -1313,6 +1313,29 @@ test('native backgrounds share an in-flight request and enforce response boundar
     }
 });
 
+test('content scripts prefetch at document start without timetable DOM', async () => {
+    const emptyDocument = '<!doctype html><html><head></head><body></body></html>';
+
+    for (const contentPath of extensionContentPaths) {
+        const environment = loadContentScript(contentPath, emptyDocument);
+
+        assert.deepEqual(
+            JSON.parse(JSON.stringify(environment.runtimeMessages)),
+            [{ action: 'loadAcademicCalendarSource' }]
+        );
+        const response = await requestContentMessage(
+            environment,
+            'getAcademicCalendar'
+        );
+        assert.ok(
+            response.calendar,
+            `${contentPath}: ${response.error || 'missing calendar'}`
+        );
+        assert.equal(environment.runtimeMessages.length, 1);
+        environment.dom.window.close();
+    }
+});
+
 test('content injection prefetches exactly once and reuses pending and successful data', async () => {
     for (const contentPath of extensionContentPaths) {
         const deferred = createDeferred();
@@ -1533,7 +1556,7 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
 
     for (const [index, manifestPath] of extensionManifestPaths.entries()) {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        assert.equal(manifest.version, '1.1.2');
+        assert.equal(manifest.version, '1.1.3');
         assert.match(manifest.description, /^Unofficial tool\b/);
         assert.deepEqual(
             [...(manifest.permissions || [])].sort(),
@@ -1564,6 +1587,10 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
 
         const contentScripts = manifest.content_scripts || [];
         assert.ok(contentScripts.length > 0, `${manifestPath} has no content script`);
+        assert.ok(
+            contentScripts.every((entry) => entry.run_at === 'document_start'),
+            `${manifestPath} must prefetch at document_start`
+        );
         const loadedScripts = contentScripts.flatMap((entry) => entry.js || []);
         assert.deepEqual(
             loadedScripts,
@@ -1571,6 +1598,14 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
             `${manifestPath} must load the calendar parser before content.js`
         );
     }
+
+    const firefoxManifest = JSON.parse(
+        fs.readFileSync(extensionManifestPaths[1], 'utf8')
+    );
+    assert.equal(
+        firefoxManifest.browser_specific_settings.gecko.strict_min_version,
+        '127.0'
+    );
 });
 
 test('loads calendar.js before popup.js and starts every popup with a disabled year select', () => {

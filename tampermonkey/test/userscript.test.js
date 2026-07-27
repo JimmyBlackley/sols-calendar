@@ -10,6 +10,8 @@ const userscript = fs.readFileSync(path.join(root, 'sols-calendar.user.js'), 'ut
 const packageManifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packageLock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const keyDatesUrl = 'https://www.uow.edu.au/student/dates/';
+const lateTimetableFixture =
+    '<!doctype html><html><head></head><body><main id="late-root"></main></body></html>';
 
 const teachingPeriods = {
     2026: {
@@ -211,6 +213,18 @@ function createEnvironment(options = {}) {
     return { blobs, dom, downloads, errors, requests, revoked, window };
 }
 
+function appendTimetableFixture(window) {
+    const fixtureDocument = new window.DOMParser().parseFromString(
+        solsFixture,
+        'text/html'
+    );
+    const timetableContainer = fixtureDocument.querySelector('main');
+    assert(timetableContainer);
+    window.document.body.appendChild(
+        window.document.importNode(timetableContainer, true)
+    );
+}
+
 async function invokeTrustedListeners(window, element, type) {
     const listeners = window.__registeredTestListeners.get(element)?.get(type) || [];
     assert.ok(listeners.length > 0, `No ${type} listener was registered`);
@@ -267,22 +281,37 @@ async function waitForAcademicYearLoad(window) {
     throw new Error('Timed out waiting for the automatic academic-year load');
 }
 
+async function waitForLatePanelAndAcademicYearLoad(window) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        const panel = window.document.getElementById('sols-calendar-export');
+        const button = panel?.querySelector('button');
+        const status = panel?.querySelector('.sols-calendar-status');
+        if (panel && !button.disabled && status.dataset.state !== 'working') {
+            return panel;
+        }
+    }
+
+    throw new Error('Timed out waiting for the late timetable panel');
+}
+
 function getICS(blobs) {
     assert.equal(blobs.length, 1);
     return blobs[0].parts.join('');
 }
 
 test('metadata keeps execution page-scoped and grants only the UOW calendar request', () => {
-    assert.match(userscript, /@version\s+1\.1\.2/);
-    assert.equal(packageManifest.version, '1.1.2');
-    assert.equal(packageLock.version, '1.1.2');
-    assert.equal(packageLock.packages[''].version, '1.1.2');
+    assert.match(userscript, /@version\s+1\.1\.3/);
+    assert.equal(packageManifest.version, '1.1.3');
+    assert.equal(packageLock.version, '1.1.3');
+    assert.equal(packageLock.packages[''].version, '1.1.3');
     assert.match(
         userscript,
         /@match\s+https:\/\/solss\.uow\.edu\.au\/sid\/sols_tutorial_enrolment\.my_timetable\*/
     );
     assert.match(userscript, /@grant\s+GM_xmlhttpRequest/);
     assert.match(userscript, /@connect\s+www\.uow\.edu\.au/);
+    assert.match(userscript, /@run-at\s+document-start/);
     assert.match(userscript, /@noframes/);
     assert.doesNotMatch(userscript, /@grant\s+none/);
     assert.doesNotMatch(userscript, /@require\b|@resource\b/);
@@ -314,7 +343,7 @@ test('injects a SOLS-style panel and automatically requests academic years once'
     assert.equal(yearControl.classList.contains('input-sm'), true);
     assert.deepEqual(
         Array.from(yearControl.options, (option) => [option.value, option.textContent]),
-        [['', 'Load from UOW…']]
+        [['', 'Loading from UOW…']]
     );
     assert.equal(window.getComputedStyle(panel.querySelector('button')).marginBottom, '0px');
     assert.equal(requests.length, 1);
@@ -336,6 +365,125 @@ test('injects a SOLS-style panel and automatically requests academic years once'
     assert.equal(window.document.querySelectorAll('#sols-calendar-export').length, 1);
     assert.equal(window.document.querySelectorAll('#sols-calendar-export-style').length, 1);
     assert.equal(requests.length, 1);
+
+    dom.window.close();
+});
+
+test('starts one request at userscript entry before a late timetable mount', async () => {
+    const { dom, requests, window } = createEnvironment({
+        solsFixture: lateTimetableFixture
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(window.document.getElementById('sols-calendar-export'), null);
+
+    delete window.document.__solsCalendarUserscriptInitialized;
+    window.eval(userscript);
+    assert.equal(requests.length, 1);
+    assert.equal(
+        Array.from(window.document.childNodes).filter(
+            (node) => (
+                node.nodeType === 8
+                && node.data === 'sols-calendar-userscript-initialized'
+            )
+        ).length,
+        1
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(window.document.getElementById('sols-calendar-export'), null);
+
+    appendTimetableFixture(window);
+    const panel = await waitForLatePanelAndAcademicYearLoad(window);
+    const yearControl = panel.querySelector('#sols-calendar-export-year');
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['2026', '2027']
+    );
+    assert.equal(yearControl.value, '2026');
+    assert.equal(yearControl.dataset.loaded, 'true');
+    assert.equal(
+        panel.querySelector('.sols-calendar-status').textContent,
+        'Select an academic year'
+    );
+
+    dom.window.close();
+});
+
+test('starts safely before documentElement exists at document start', async () => {
+    const requests = [];
+    let hadDocumentElementAtEntry = true;
+    let entryError = null;
+    const dom = new JSDOM(solsFixture, {
+        beforeParse(window) {
+            hadDocumentElementAtEntry = Boolean(window.document.documentElement);
+            window.TextEncoder = TextEncoder;
+            window.console.error = () => {};
+            window.GM_xmlhttpRequest = (details) => {
+                requests.push(details);
+                window.queueMicrotask(() => {
+                    details.onload(successfulResponse());
+                });
+                return { abort() {} };
+            };
+            try {
+                window.eval(userscript);
+            } catch (error) {
+                entryError = error;
+            }
+        },
+        runScripts: 'outside-only',
+        url: 'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable'
+    });
+
+    assert.equal(hadDocumentElementAtEntry, false);
+    assert.equal(entryError, null);
+    assert.equal(requests.length, 1);
+    await waitForLatePanelAndAcademicYearLoad(dom.window);
+    assert.deepEqual(
+        Array.from(
+            dom.window.document.querySelector('#sols-calendar-export-year').options,
+            (option) => option.value
+        ),
+        ['2026', '2027']
+    );
+
+    dom.window.close();
+});
+
+test('does not retry a failed entry request merely because the timetable mounts later', async () => {
+    let attempts = 0;
+    const { dom, requests, window } = createEnvironment({
+        solsFixture: lateTimetableFixture,
+        gmHandler(details) {
+            attempts += 1;
+            if (attempts === 1) {
+                details.onerror();
+            } else {
+                details.onload(successfulResponse());
+            }
+        }
+    });
+
+    assert.equal(requests.length, 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    appendTimetableFixture(window);
+
+    const panel = await waitForLatePanelAndAcademicYearLoad(window);
+    const yearControl = panel.querySelector('#sols-calendar-export-year');
+    assert.equal(requests.length, 1);
+    assert.equal(yearControl.options[0].textContent, 'Retry loading from UOW…');
+    assert.equal(panel.querySelector('.sols-calendar-status').dataset.state, 'error');
+
+    await interactWithYearControlAndWait(window);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['2026', '2027']
+    );
+    assert.equal(yearControl.value, '2026');
 
     dom.window.close();
 });
@@ -995,6 +1143,45 @@ test('retries a failed automatic load from a trusted year-control interaction', 
     assert.equal(requests.length, 2);
     assert.equal(downloads.length, 1);
     assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
+
+    dom.window.close();
+});
+
+test('treats pointerdown and click from one control interaction as one retry', async () => {
+    let attempt = 0;
+    const { dom, requests, window } = createEnvironment({
+        gmHandler(details) {
+            attempt += 1;
+            if (attempt < 3) {
+                details.onerror();
+            } else {
+                details.onload(successfulResponse());
+            }
+        }
+    });
+
+    await waitForAcademicYearLoad(window);
+    const yearControl = window.document.querySelector(
+        '#sols-calendar-export-year'
+    );
+
+    await invokeTrustedListeners(window, yearControl, 'pointerdown');
+    assert.equal(requests.length, 2);
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').dataset.state,
+        'error'
+    );
+
+    await invokeTrustedListeners(window, yearControl, 'click');
+    assert.equal(requests.length, 2);
+
+    await invokeTrustedListeners(window, yearControl, 'click');
+    assert.equal(requests.length, 3);
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['2026', '2027']
+    );
+    assert.equal(yearControl.value, '2026');
 
     dom.window.close();
 });

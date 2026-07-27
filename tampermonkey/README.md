@@ -24,9 +24,13 @@ by, or supported by UOW.
 5. Open SOLS **Timetable > My Timetable**. The calendar export panel appears
    immediately above the timetable.
 
-When the exact My Timetable document loads, the script automatically uses
-`GM_xmlhttpRequest` with `@connect www.uow.edu.au` once to retrieve the fixed
-public URL `https://www.uow.edu.au/student/dates/`. The request contains no
+When the exact My Timetable document begins loading, the script automatically
+uses `GM_xmlhttpRequest` with `@connect www.uow.edu.au` once to retrieve the
+fixed public URL `https://www.uow.edu.au/student/dates/`. It starts at
+`document-start`, before the timetable container or export panel needs to
+exist and without waiting for any user interaction. Once SOLS adds the
+timetable, the panel consumes the same pending or completed result and replaces
+the loading option with the published numeric years. The request contains no
 timetable or student data, omits cookies, and rejects redirects. The returned
 HTML is parsed only as academic-calendar data; no remote code is executed.
 

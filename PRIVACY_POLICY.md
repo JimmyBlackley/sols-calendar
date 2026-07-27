@@ -23,15 +23,16 @@ The Software reads timetable data **only** from the UOW SOLS "My Timetable" page
 - Room/location information
 - Teaching weeks
 
-When the exact My Timetable document loads, the browser extension content
-script or Tampermonkey userscript automatically starts one fixed `GET` request
-to UOW's public academic calendar page at
-`https://www.uow.edu.au/student/dates/`. A successful result is reused for the
-life of that My Timetable document. A failed automatic request is not repeated
-in a loop; a later user action that opens the extension popup or uses the
-userscript's year control or Export button may retry it. The Software does not
-read other browsing activity or inspect the content of pages other than the
-two URLs described above.
+When the exact My Timetable document begins loading, the browser extension
+content script or Tampermonkey userscript automatically starts one fixed `GET`
+request to UOW's public academic calendar page at
+`https://www.uow.edu.au/student/dates/`. This request starts without waiting
+for timetable DOM discovery, the extension popup, or another user interaction.
+A successful result is reused for the life of that My Timetable document. A
+failed automatic request is not repeated in a loop; a later user action that
+opens the extension popup or uses the userscript's year control or Export
+button may retry it. The Software does not read other browsing activity or
+inspect the content of pages other than the two URLs described above.
 
 ## Data Usage
 

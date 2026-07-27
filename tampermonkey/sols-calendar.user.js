@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         SOLS Timetable to ICS
 // @namespace    https://github.com/JimmyBlackley/sols-calendar
-// @version      1.1.2
+// @version      1.1.3
 // @description  Unofficial tool to export your UOW SOLS timetable to a local ICS calendar file
 // @author       James Blackley
 // @license      MIT
 // @homepageURL  https://github.com/JimmyBlackley/sols-calendar
 // @supportURL   https://github.com/JimmyBlackley/sols-calendar/issues
 // @match        https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @connect      www.uow.edu.au
 // @noframes
@@ -19,6 +19,8 @@
 
     const PANEL_ID = 'sols-calendar-export';
     const STYLE_ID = 'sols-calendar-export-style';
+    const DOCUMENT_GUARD_PROPERTY = '__solsCalendarUserscriptInitialized';
+    const DOCUMENT_GUARD_MARKER = 'sols-calendar-userscript-initialized';
     const DOWNLOAD_FILENAME = 'UOW_class_timetable.ics';
     const UOW_KEY_DATES_URL = 'https://www.uow.edu.au/student/dates/';
     const UOW_KEY_DATES_TIMEOUT_MS = 10_000;
@@ -58,6 +60,43 @@
         dec: 11,
         december: 11
     };
+
+    const hasSharedDocumentGuard = Array.from(document.childNodes).some(
+        (node) => node.nodeType === 8 && node.data === DOCUMENT_GUARD_MARKER
+    );
+    if (document[DOCUMENT_GUARD_PROPERTY] || hasSharedDocumentGuard) {
+        return;
+    }
+    document[DOCUMENT_GUARD_PROPERTY] = true;
+    document.appendChild(document.createComment(DOCUMENT_GUARD_MARKER));
+
+    let academicCalendars = null;
+    let academicCalendarRequest = null;
+
+    function loadAvailableAcademicCalendars() {
+        if (academicCalendars) {
+            return Promise.resolve(academicCalendars);
+        }
+        if (academicCalendarRequest) {
+            return academicCalendarRequest;
+        }
+
+        academicCalendarRequest = requestLiveAcademicCalendars()
+            .then((calendars) => {
+                academicCalendars = calendars;
+                return calendars;
+            })
+            .finally(() => {
+                academicCalendarRequest = null;
+            });
+        return academicCalendarRequest;
+    }
+
+    // Start before timetable-panel discovery so no page interaction is needed.
+    const initialAcademicCalendarRequest = loadAvailableAcademicCalendars();
+    initialAcademicCalendarRequest.catch((error) => {
+        console.error('SOLS Calendar academic-year preload error:', error);
+    });
 
     function normalizeText(value) {
         return String(value)
@@ -975,7 +1014,7 @@
         yearControl.className = 'form-control input-sm sols-calendar-year-value';
         const yearPlaceholder = document.createElement('option');
         yearPlaceholder.value = '';
-        yearPlaceholder.textContent = 'Load from UOW…';
+        yearPlaceholder.textContent = 'Loading from UOW…';
         yearControl.appendChild(yearPlaceholder);
         field.append(label, yearControl);
 
@@ -994,36 +1033,35 @@
         disclaimer.textContent =
             'Unofficial independent tool — not affiliated with, endorsed by, or supported by UOW.';
 
-        let academicCalendars = null;
-        let academicCalendarRequest = null;
-
-        const loadAvailableAcademicCalendars = async () => {
-            if (academicCalendars) {
-                return academicCalendars;
-            }
-            if (academicCalendarRequest) {
-                return academicCalendarRequest;
-            }
-
-            academicCalendarRequest = requestLiveAcademicCalendars();
-            try {
-                const calendars = await academicCalendarRequest;
+        const loadAndPopulateAcademicCalendars = async (
+            request = loadAvailableAcademicCalendars()
+        ) => {
+            const calendars = await request;
+            if (yearControl.dataset.loaded !== 'true') {
                 populateAcademicYearSelect(yearControl, calendars);
-                academicCalendars = calendars;
-                return calendars;
-            } catch (error) {
-                academicCalendars = null;
-                throw error;
-            } finally {
-                academicCalendarRequest = null;
             }
+            return calendars;
         };
 
+        let suppressNextYearControlClick = false;
         const loadYearsFromControl = async (event) => {
             if (!event?.isTrusted) {
                 return;
             }
-            if (academicCalendars || academicCalendarRequest) {
+            if (event.type === 'click' && suppressNextYearControlClick) {
+                suppressNextYearControlClick = false;
+                return;
+            }
+            if (event.type === 'pointerdown' || event.type === 'keydown') {
+                suppressNextYearControlClick = true;
+            }
+            if (academicCalendars) {
+                if (yearControl.dataset.loaded !== 'true') {
+                    populateAcademicYearSelect(yearControl, academicCalendars);
+                }
+                return;
+            }
+            if (academicCalendarRequest) {
                 return;
             }
 
@@ -1031,7 +1069,7 @@
             status.dataset.state = 'working';
             status.textContent = 'Loading UOW academic years…';
             try {
-                await loadAvailableAcademicCalendars();
+                await loadAndPopulateAcademicCalendars();
                 status.dataset.state = 'ready';
                 status.textContent = 'Select an academic year';
             } catch (error) {
@@ -1046,6 +1084,9 @@
         yearControl.addEventListener('pointerdown', loadYearsFromControl);
         yearControl.addEventListener('keydown', loadYearsFromControl);
         yearControl.addEventListener('click', loadYearsFromControl);
+        yearControl.addEventListener('blur', () => {
+            suppressNextYearControlClick = false;
+        });
 
         button.addEventListener('click', async (event) => {
             if (!event.isTrusted) {
@@ -1057,7 +1098,7 @@
             status.textContent = 'Loading UOW academic calendar…';
 
             try {
-                const calendars = await loadAvailableAcademicCalendars();
+                const calendars = await loadAndPopulateAcademicCalendars();
                 const year = Number(yearControl.value);
                 if (!Number.isInteger(year) || !calendars[year]) {
                     throw new Error('Select an academic year published by UOW');
@@ -1093,13 +1134,12 @@
         yearControl.disabled = true;
         status.dataset.state = 'working';
         status.textContent = 'Loading UOW academic years…';
-        loadAvailableAcademicCalendars()
+        loadAndPopulateAcademicCalendars(initialAcademicCalendarRequest)
             .then(() => {
                 status.dataset.state = 'ready';
                 status.textContent = 'Select an academic year';
             })
             .catch((error) => {
-                console.error('SOLS Calendar academic-year preload error:', error);
                 yearPlaceholder.textContent = 'Retry loading from UOW…';
                 status.dataset.state = 'error';
                 status.textContent = error.message;
@@ -1134,7 +1174,7 @@
             }
         });
 
-        observer.observe(document.documentElement, {
+        observer.observe(document, {
             childList: true,
             subtree: true
         });
