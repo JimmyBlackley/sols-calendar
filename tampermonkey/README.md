@@ -20,13 +20,14 @@ by, or supported by UOW.
 3. Open the userscript manager's dashboard and install
    `sols-calendar.user.js`.
 4. Allow the userscript manager to run on `solss.uow.edu.au` and retrieve
-   public dates from `www.uow.edu.au`.
+   public dates from `*.uow.edu.au`.
 5. Open SOLS **Timetable > My Timetable**. The calendar export panel appears
    immediately above the timetable.
 
 When the exact My Timetable document begins loading, the script automatically
-uses `GM_xmlhttpRequest` with `@connect www.uow.edu.au` once to retrieve the
-fixed public URL `https://www.uow.edu.au/student/dates/`. It starts at
+uses `GM_xmlhttpRequest` with `@connect uow.edu.au` (covering all UOW
+subdomains) once to retrieve the fixed public URL
+`https://www.uow.edu.au/student/dates/`. It starts at
 `document-start`, before the timetable container or export panel needs to
 exist and without waiting for any user interaction. Once SOLS adds the
 timetable, the panel consumes the same pending or completed result and replaces

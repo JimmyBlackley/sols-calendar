@@ -1539,9 +1539,9 @@ test('native content scripts return an error instead of silently skipping malfor
     }
 });
 
-test('keeps native manifests scoped and configures platform-correct backgrounds', () => {
-    const calendarHost = 'https://www.uow.edu.au/*';
-    const safariTimetableHost =
+test('keeps content scripts page-scoped while granting UOW subdomains', () => {
+    const uowHost = 'https://*.uow.edu.au/*';
+    const timetableContentMatch =
         'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*';
     const expectedPermissions = [
         ['activeTab', 'downloads'],
@@ -1556,7 +1556,7 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
 
     for (const [index, manifestPath] of extensionManifestPaths.entries()) {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        assert.equal(manifest.version, '1.1.3');
+        assert.equal(manifest.version, '1.1.4');
         assert.match(manifest.description, /^Unofficial tool\b/);
         assert.deepEqual(
             [...(manifest.permissions || [])].sort(),
@@ -1566,17 +1566,14 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
 
         const hostPermissions = manifest.host_permissions || [];
         assert.equal(
-            hostPermissions.filter((permission) => permission === calendarHost).length,
+            hostPermissions.filter((permission) => permission === uowHost).length,
             1,
-            `${manifestPath} must contain the UOW calendar host exactly once`
+            `${manifestPath} must contain the UOW wildcard host exactly once`
         );
 
-        const expectedHosts = index === 2
-            ? [calendarHost, safariTimetableHost]
-            : [calendarHost];
         assert.deepEqual(
             [...hostPermissions].sort(),
-            expectedHosts.sort(),
+            [uowHost],
             `${manifestPath} has unexpected host permissions`
         );
         assert.deepEqual(
@@ -1590,6 +1587,11 @@ test('keeps native manifests scoped and configures platform-correct backgrounds'
         assert.ok(
             contentScripts.every((entry) => entry.run_at === 'document_start'),
             `${manifestPath} must prefetch at document_start`
+        );
+        assert.deepEqual(
+            contentScripts.flatMap((entry) => entry.matches || []),
+            [timetableContentMatch],
+            `${manifestPath} must inject only on the SOLS timetable`
         );
         const loadedScripts = contentScripts.flatMap((entry) => entry.js || []);
         assert.deepEqual(

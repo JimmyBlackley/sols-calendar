@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOLS Timetable to ICS
 // @namespace    https://github.com/JimmyBlackley/sols-calendar
-// @version      1.1.3
+// @version      1.1.5
 // @description  Unofficial tool to export your UOW SOLS timetable to a local ICS calendar file
 // @author       James Blackley
 // @license      MIT
@@ -10,7 +10,7 @@
 // @match        https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
-// @connect      www.uow.edu.au
+// @connect      uow.edu.au
 // @noframes
 // ==/UserScript==
 
@@ -903,8 +903,14 @@
                 margin-bottom: 0;
             }
 
+            #${PANEL_ID} .sols-calendar-actions {
+                align-items: center;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
             #${PANEL_ID} .sols-calendar-status {
-                align-self: center;
                 margin: 0;
                 min-height: 20px;
             }
@@ -923,6 +929,11 @@
 
             @media (max-width: 600px) {
                 #${PANEL_ID} .sols-calendar-controls {
+                    align-items: stretch;
+                    flex-direction: column;
+                }
+
+                #${PANEL_ID} .sols-calendar-actions {
                     align-items: stretch;
                     flex-direction: column;
                 }
@@ -1028,6 +1039,10 @@
         status.setAttribute('role', 'status');
         status.setAttribute('aria-live', 'polite');
 
+        const actions = document.createElement('div');
+        actions.className = 'sols-calendar-actions';
+        actions.append(button, status);
+
         const disclaimer = document.createElement('p');
         disclaimer.className = 'help-block sols-calendar-disclaimer';
         disclaimer.textContent =
@@ -1126,7 +1141,7 @@
             }
         });
 
-        controls.append(field, button, status);
+        controls.append(field, actions);
         body.append(controls, disclaimer);
         panel.append(heading, body);
 

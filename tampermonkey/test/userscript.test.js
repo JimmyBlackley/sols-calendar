@@ -301,16 +301,16 @@ function getICS(blobs) {
 }
 
 test('metadata keeps execution page-scoped and grants only the UOW calendar request', () => {
-    assert.match(userscript, /@version\s+1\.1\.3/);
-    assert.equal(packageManifest.version, '1.1.3');
-    assert.equal(packageLock.version, '1.1.3');
-    assert.equal(packageLock.packages[''].version, '1.1.3');
+    assert.match(userscript, /@version\s+1\.1\.5/);
+    assert.equal(packageManifest.version, '1.1.5');
+    assert.equal(packageLock.version, '1.1.5');
+    assert.equal(packageLock.packages[''].version, '1.1.5');
     assert.match(
         userscript,
         /@match\s+https:\/\/solss\.uow\.edu\.au\/sid\/sols_tutorial_enrolment\.my_timetable\*/
     );
     assert.match(userscript, /@grant\s+GM_xmlhttpRequest/);
-    assert.match(userscript, /@connect\s+www\.uow\.edu\.au/);
+    assert.match(userscript, /@connect\s+uow\.edu\.au/);
     assert.match(userscript, /@run-at\s+document-start/);
     assert.match(userscript, /@noframes/);
     assert.doesNotMatch(userscript, /@grant\s+none/);
@@ -341,6 +341,22 @@ test('injects a SOLS-style panel and automatically requests academic years once'
     assert.equal(yearControl.tagName, 'SELECT');
     assert.equal(yearControl.classList.contains('form-control'), true);
     assert.equal(yearControl.classList.contains('input-sm'), true);
+    const actions = panel.querySelector('.sols-calendar-actions');
+    const exportButton = panel.querySelector('.sols-calendar-export-button');
+    const status = panel.querySelector('.sols-calendar-status');
+    assert(actions);
+    assert.equal(exportButton.parentElement, actions);
+    assert.equal(status.parentElement, actions);
+    assert.equal(window.getComputedStyle(actions).display, 'flex');
+    assert.equal(window.getComputedStyle(actions).alignItems, 'center');
+    assert.equal(
+        window.getComputedStyle(panel.querySelector('.sols-calendar-controls')).alignItems,
+        'flex-end'
+    );
+    assert.match(
+        window.document.getElementById('sols-calendar-export-style').textContent,
+        /@media\s*\(max-width:\s*600px\)[\s\S]*?\.sols-calendar-actions\s*\{[\s\S]*?align-items:\s*stretch;[\s\S]*?flex-direction:\s*column;/
+    );
     assert.deepEqual(
         Array.from(yearControl.options, (option) => [option.value, option.textContent]),
         [['', 'Loading from UOW…']]

@@ -49,7 +49,7 @@ required.
    if your team already uses it.
 3. Select the **SOLS Calendar** scheme and your Mac, then click **Run**.
 4. In Safari, open **Settings > Extensions**, enable **SOLS Calendar**, and
-   allow access to `solss.uow.edu.au` and `www.uow.edu.au`.
+   allow access to `*.uow.edu.au`.
 
 ### Alternative — Tampermonkey userscript
 
@@ -60,13 +60,14 @@ so there is no toolbar popup to open.
 2. Open Tampermonkey's script editor and install
    `tampermonkey/sols-calendar.user.js`.
 3. Allow Tampermonkey to run the script on `solss.uow.edu.au` and retrieve
-   public dates from `www.uow.edu.au`.
+   public dates from `*.uow.edu.au`.
 4. Open SOLS **Timetable > My Timetable** and use the **Export to ICS** button
    above the timetable.
 
 The userscript runs only on the exact SOLS timetable URL. Its
-`GM_xmlhttpRequest` grant and `@connect www.uow.edu.au` declaration are used
-only to retrieve UOW's public academic dates once when My Timetable loads.
+`GM_xmlhttpRequest` grant and `@connect uow.edu.au` declaration (which covers
+all UOW subdomains) are used only to retrieve UOW's public academic dates once
+when My Timetable loads.
 See [`tampermonkey/README.md`](tampermonkey/README.md) for development and test
 instructions.
 

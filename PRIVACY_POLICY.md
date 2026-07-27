@@ -1,6 +1,6 @@
 # Privacy Policy — SOLS Timetable to ICS
 
-**Last updated:** 27 July 2026
+**Last updated:** 28 July 2026
 
 ## Overview
 
@@ -91,8 +91,8 @@ timetable details needed for its calendar events.
 | `activeTab` (browser extension packages) | Identify and communicate with the current SOLS timetable tab when the user opens the extension popup. Timetable rows are read only after the user clicks Export. |
 | `downloads` (Chromium package only) | Save only the locally generated ICS calendar file to the user's device via Chrome's local download flow. Firefox, Safari, and the userscript use a temporary in-memory Blob link and do not request this permission. |
 | Host access to the specific SOLS timetable URL | Run extension content scripts or the userscript only on `https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*` to parse the timetable HTML. |
-| Host access to `https://www.uow.edu.au/*` (browser extension packages) | Allow the Chromium, Firefox, and Safari background context to make the fixed request to `https://www.uow.edu.au/student/dates/` when My Timetable loads. No content script is run on UOW's public website. |
-| Tampermonkey `GM_xmlhttpRequest` and `@connect www.uow.edu.au` | Allow Tampermonkey to retrieve that same public academic calendar page when My Timetable loads despite browser cross-origin restrictions. The userscript's execution scope remains limited to the exact SOLS timetable URL. |
+| Host access to `https://*.uow.edu.au/*` (browser extension packages) | Allow the Chromium, Firefox, and Safari background context to make the fixed request to `https://www.uow.edu.au/student/dates/` when My Timetable loads. No content script is run on other UOW pages. |
+| Tampermonkey `GM_xmlhttpRequest` and `@connect uow.edu.au` | Allow Tampermonkey to retrieve that same public academic calendar page when My Timetable loads despite browser cross-origin restrictions. Tampermonkey treats the base domain as covering its subdomains; the userscript's execution scope remains limited to the exact SOLS timetable URL. |
 
 ## Limited Use Disclosure
 
