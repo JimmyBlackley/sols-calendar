@@ -65,25 +65,26 @@
             margin-bottom: 6px;
         }
 
-        .field input {
+        .field select {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 6px;
             background: rgba(255, 255, 255, 0.08);
             color: #fff;
+            color-scheme: dark;
             font-size: 13px;
             outline: none;
-            cursor: text;
+            cursor: pointer;
             transition: border-color 0.2s, background 0.2s;
         }
 
-        .field input:hover {
+        .field select:hover {
             border-color: rgba(255, 255, 255, 0.35);
             background: rgba(255, 255, 255, 0.12);
         }
 
-        .field input:focus {
+        .field select:focus {
             border-color: #4da6ff;
             background: rgba(255, 255, 255, 0.12);
         }
@@ -180,11 +181,12 @@
 
         <div class="field">
             <label for="yearSelect">Academic Year</label>
-            <input id="yearSelect" type="number" min="2000" max="2100"
-                step="1" inputmode="numeric">
+            <select id="yearSelect" disabled>
+                <option value="">Loading from UOW…</option>
+            </select>
         </div>
 
-        <button class="btn-export" id="exportBtn">
+        <button class="btn-export" id="exportBtn" disabled>
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor"
                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />

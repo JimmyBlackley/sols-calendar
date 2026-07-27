@@ -1,6 +1,6 @@
 {
   "name": "sols-calendar-userscript",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Development and test environment for the SOLS Timetable to ICS userscript",
   "scripts": {

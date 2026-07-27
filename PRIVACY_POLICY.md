@@ -20,35 +20,43 @@ The Software reads timetable data **only** from the UOW SOLS "My Timetable" page
 - Room/location information
 - Teaching weeks
 
-When the user initiates an export, the Software also retrieves UOW's public
-academic calendar page with a fixed `GET` request to
-`https://www.uow.edu.au/student/dates/`. It does not read other browsing
-activity or inspect the content of pages other than the two URLs described
-above.
+The browser extension packages retrieve UOW's public academic calendar page
+with a fixed `GET` request to `https://www.uow.edu.au/student/dates/` when the
+user opens the extension popup. The Tampermonkey userscript makes the same
+request only after the user interacts with its academic-year control or clicks
+"Export to ICS"; loading the SOLS timetable page alone does not trigger the
+request. The Software does not read other browsing activity or inspect the
+content of pages other than the two URLs described above.
 
 ## Data Usage
 
 All collected timetable data is used **solely** to generate an ICS calendar file on the user's device. Specifically:
 
 - Data is parsed from the page DOM in real time when the user clicks "Export to ICS."
-- At the same time, the Software retrieves public teaching-week dates from the
-  fixed UOW academic calendar URL. The request contains no timetable data,
-  student number, selected year, or other query data, and request credentials
-  and cookies are omitted. Redirects are rejected, so the request is not
-  forwarded to another endpoint.
+- At the times described above, the Software retrieves public teaching-week
+  dates from the fixed UOW academic calendar URL. The request contains no
+  timetable data, student number, selected year, or other query data, and
+  request credentials and cookies are omitted. Redirects are rejected, so the
+  request is not forwarded to another endpoint.
 - The returned academic calendar HTML is parsed only as data. The Software does
   not execute scripts or other code from the response.
+- An academic year is offered for selection only when the live response
+  contains complete Autumn, Spring, and Annual teaching calendars for that
+  year and all three pass validation. The Software does not accept an
+  arbitrary user-entered year or guess an unpublished calendar.
 - The parsed data is converted into ICS format entirely within the browser.
 - The resulting `.ics` file is handed directly to the browser's local download
   flow. Chromium-based browser extension builds use the `chrome.downloads`
   API; Firefox, Safari, and the userscript use a temporary in-memory Blob
   download link. The remote academic calendar response is not saved as a file.
-- Timetable and academic calendar data are kept in memory only for the current
-  export. **No data is stored, cached, or persisted** by the Software after the
-  export is complete.
-- If the online academic calendar is unavailable or invalid, the Software uses
-  bundled, verified dates for the same year. If that year is not available in
-  either source, the export stops rather than guessing dates.
+- The academic calendar response, validated dates, and available-year list are
+  kept only in browser memory while the extension popup or active userscript
+  interaction needs them. Timetable data is kept only for the current export.
+  **No data is written to extension or userscript storage, cached for later
+  sessions, or otherwise persisted** by the Software.
+- If the online academic calendar is unavailable or invalid, or no complete
+  year is available, the export stops with an error rather than guessing
+  dates.
 
 ## Data Sharing
 
@@ -64,9 +72,9 @@ networking details, and request time.
 Timetable parsing, academic-date parsing, and ICS generation all happen locally
 within the browser. The remote response is treated as untrusted data and is
 validated before use; remotely supplied code is never executed. No timetable
-or academic calendar data is persisted beyond the export. The exported `.ics`
-file includes no identifiers about the student other than the timetable details
-needed for its calendar events.
+or academic calendar data is persisted beyond the popup or active interaction
+that needs it. The exported `.ics` file includes no identifiers about the
+student other than the timetable details needed for its calendar events.
 
 ## Permissions
 

@@ -84,6 +84,37 @@ function buildAcademicCalendarFixture(periods = teachingPeriods) {
         </html>`;
 }
 
+function duplicateAcademicSessionPanel(
+    html,
+    year,
+    session,
+    mutateDuplicate = () => {}
+) {
+    const fixtureDom = new JSDOM(html);
+    const { document } = fixtureDom.window;
+    const title = `${session[0].toUpperCase()}${session.slice(1)} Session ${year}`;
+    const sourceAnchor = Array.from(document.querySelectorAll('a[href^="#tab-"]'))
+        .find((anchor) => anchor.textContent.trim() === title);
+    assert(sourceAnchor, `Missing fixture anchor for ${title}`);
+
+    const duplicateId = `tab-fixture-duplicate-${session}-${year}`;
+    const duplicateListItem = sourceAnchor.parentElement.cloneNode(true);
+    duplicateListItem.querySelector('a').setAttribute('href', `#${duplicateId}`);
+    sourceAnchor.parentElement.after(duplicateListItem);
+
+    const sourcePanelId = sourceAnchor.getAttribute('href').slice(1);
+    const sourcePanel = document.getElementById(sourcePanelId);
+    assert(sourcePanel, `Missing fixture panel for ${title}`);
+    const duplicatePanel = sourcePanel.cloneNode(true);
+    duplicatePanel.id = duplicateId;
+    mutateDuplicate(duplicatePanel);
+    sourcePanel.after(duplicatePanel);
+
+    const result = fixtureDom.serialize();
+    fixtureDom.window.close();
+    return result;
+}
+
 const validAcademicCalendarHtml = buildAcademicCalendarFixture();
 
 function successfulResponse(responseText = validAcademicCalendarHtml, overrides = {}) {
@@ -102,11 +133,45 @@ function createEnvironment(options = {}) {
         url: 'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable'
     });
     const { window } = dom;
+    const NativeDate = window.Date;
+    const fixedNow = Date.UTC(options.currentYear || 2026, 6, 27, 12);
+    window.Date = class TestDate extends NativeDate {
+        constructor(...args) {
+            if (args.length === 0) {
+                super(fixedNow);
+            } else {
+                super(...args);
+            }
+        }
+
+        static now() {
+            return fixedNow;
+        }
+    };
     const downloads = [];
     const blobs = [];
     const revoked = [];
     const requests = [];
     const errors = [];
+    const registeredListeners = new WeakMap();
+    const nativeAddEventListener = window.EventTarget.prototype.addEventListener;
+
+    window.EventTarget.prototype.addEventListener = function addEventListener(
+        type,
+        listener,
+        listenerOptions
+    ) {
+        let listenersByType = registeredListeners.get(this);
+        if (!listenersByType) {
+            listenersByType = new Map();
+            registeredListeners.set(this, listenersByType);
+        }
+        const listeners = listenersByType.get(type) || [];
+        listeners.push(listener);
+        listenersByType.set(type, listeners);
+        return nativeAddEventListener.call(this, type, listener, listenerOptions);
+    };
+    window.__registeredTestListeners = registeredListeners;
 
     window.Blob = class TestBlob {
         constructor(parts, blobOptions) {
@@ -146,10 +211,21 @@ function createEnvironment(options = {}) {
     return { blobs, dom, downloads, errors, requests, revoked, window };
 }
 
+async function invokeTrustedListeners(window, element, type) {
+    const listeners = window.__registeredTestListeners.get(element)?.get(type) || [];
+    assert.ok(listeners.length > 0, `No ${type} listener was registered`);
+    await Promise.all(listeners.map((listener) => listener.call(element, {
+        currentTarget: element,
+        isTrusted: true,
+        target: element,
+        type
+    })));
+}
+
 async function clickExportAndWait(window) {
     const button = window.document.querySelector('#sols-calendar-export button');
     const status = window.document.querySelector('.sols-calendar-status');
-    button.click();
+    await invokeTrustedListeners(window, button, 'click');
 
     for (let attempt = 0; attempt < 50; attempt += 1) {
         await new Promise((resolve) => setImmediate(resolve));
@@ -161,16 +237,32 @@ async function clickExportAndWait(window) {
     throw new Error('Timed out waiting for the userscript export');
 }
 
+async function interactWithYearControlAndWait(window) {
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    const button = window.document.querySelector('#sols-calendar-export button');
+    const status = window.document.querySelector('.sols-calendar-status');
+    await invokeTrustedListeners(window, yearControl, 'click');
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (!button.disabled && status.dataset.state !== 'working') {
+            return;
+        }
+    }
+
+    throw new Error('Timed out waiting for the academic-year options');
+}
+
 function getICS(blobs) {
     assert.equal(blobs.length, 1);
     return blobs[0].parts.join('');
 }
 
 test('metadata keeps execution page-scoped and grants only the UOW calendar request', () => {
-    assert.match(userscript, /@version\s+1\.1\.0/);
-    assert.equal(packageManifest.version, '1.1.0');
-    assert.equal(packageLock.version, '1.1.0');
-    assert.equal(packageLock.packages[''].version, '1.1.0');
+    assert.match(userscript, /@version\s+1\.1\.1/);
+    assert.equal(packageManifest.version, '1.1.1');
+    assert.equal(packageLock.version, '1.1.1');
+    assert.equal(packageLock.packages[''].version, '1.1.1');
     assert.match(
         userscript,
         /@match\s+https:\/\/solss\.uow\.edu\.au\/sid\/sols_tutorial_enrolment\.my_timetable\*/
@@ -184,10 +276,11 @@ test('metadata keeps execution page-scoped and grants only the UOW calendar requ
         userscript,
         /fetch\s*\(|\bXMLHttpRequest\b|WebSocket|sendBeacon|localStorage|sessionStorage|indexedDB/
     );
+    assert.doesNotMatch(userscript, /BUNDLED_ACADEMIC|20\d{2}-\d{2}-\d{2}/);
 });
 
-test('injects a SOLS-style panel without making a request before user action', () => {
-    const { dom, requests, window } = createEnvironment();
+test('injects a SOLS-style panel and rejects synthetic page events', async () => {
+    const { dom, downloads, requests, window } = createEnvironment();
     const panel = window.document.getElementById('sols-calendar-export');
     const timetable = window.document.getElementById('mobile-version');
 
@@ -198,18 +291,97 @@ test('injects a SOLS-style panel without making a request before user action', (
     assert.equal(panel.querySelector('button').textContent, 'Export to ICS');
 
     const yearControl = panel.querySelector('#sols-calendar-export-year');
-    assert.equal(yearControl.tagName, 'INPUT');
-    assert.equal(yearControl.type, 'number');
-    assert.equal(yearControl.min, '2000');
-    assert.equal(yearControl.max, '2100');
-    assert.equal(yearControl.step, '1');
-    assert.equal(yearControl.value, String(new Date().getFullYear()));
+    assert.equal(yearControl.tagName, 'SELECT');
+    assert.equal(yearControl.classList.contains('form-control'), true);
+    assert.equal(yearControl.classList.contains('input-sm'), true);
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => [option.value, option.textContent]),
+        [['', 'Load from UOW…']]
+    );
     assert.equal(window.getComputedStyle(panel.querySelector('button')).marginBottom, '0px');
     assert.equal(requests.length, 0);
+
+    yearControl.focus();
+    yearControl.click();
+    panel.querySelector('button').click();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(requests.length, 0);
+    assert.equal(downloads.length, 0);
 
     window.eval(userscript);
     assert.equal(window.document.querySelectorAll('#sols-calendar-export').length, 1);
     assert.equal(window.document.querySelectorAll('#sols-calendar-export-style').length, 1);
+
+    dom.window.close();
+});
+
+test('loads selectable years from complete standard sessions on first year-control interaction', async () => {
+    const noisyAcademicCalendarHtml = validAcademicCalendarHtml.replace(
+        '<ul class="tabs">',
+        `<p>First enrolment date: 24 Nov 2025</p>
+         <ul class="tabs">
+             <li><a href="#tab-summer-2027">Summer Session 2027/2028</a></li>
+         `
+    );
+    const { dom, downloads, requests, window } = createEnvironment({
+        academicCalendarHtml: noisyAcademicCalendarHtml
+    });
+
+    assert.equal(requests.length, 0);
+    await interactWithYearControlAndWait(window);
+
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    assert.equal(requests.length, 1);
+    assert.equal(downloads.length, 0);
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['2026', '2027']
+    );
+    assert.equal(yearControl.value, '2026');
+    assert.equal(yearControl.dataset.loaded, 'true');
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').textContent,
+        'Select an academic year'
+    );
+
+    dom.window.close();
+});
+
+test('defaults to the earliest future year when the current year is unavailable', async () => {
+    const { dom, window } = createEnvironment({ currentYear: 2025 });
+
+    await interactWithYearControlAndWait(window);
+
+    assert.equal(
+        window.document.querySelector('#sols-calendar-export-year').value,
+        '2026'
+    );
+    dom.window.close();
+});
+
+test('lists only-past years without selecting one and exports an explicitly selected past year', async () => {
+    const { blobs, dom, downloads, window } = createEnvironment({ currentYear: 2031 });
+
+    await interactWithYearControlAndWait(window);
+
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => [option.value, option.textContent]),
+        [
+            ['', 'Select a past academic year…'],
+            ['2026', '2026'],
+            ['2027', '2027']
+        ]
+    );
+    assert.equal(yearControl.value, '');
+    assert.equal(yearControl.options[0].disabled, true);
+    assert.equal(downloads.length, 0);
+
+    yearControl.value = '2027';
+    await clickExportAndWait(window);
+
+    assert.equal(downloads.length, 1);
+    assert.match(getICS(blobs), /DTSTART;TZID=Australia\/Sydney:20270301T100000/);
 
     dom.window.close();
 });
@@ -234,6 +406,7 @@ test('uses valid live UOW dates and sends a fixed anonymous request before parsi
     assert.equal(request.method, 'GET');
     assert.equal(request.url, keyDatesUrl);
     assert.equal(request.anonymous, true);
+    assert.equal(request.nocache, true);
     assert.equal(request.timeout, 10_000);
     assert.equal(request.redirect, 'error');
     assert.deepEqual(Object.keys(request.headers), ['Accept']);
@@ -261,7 +434,6 @@ test('uses valid live UOW dates and sends a fixed anonymous request before parsi
     const status = window.document.querySelector('.sols-calendar-status');
     assert.equal(status.dataset.state, 'success');
     assert.match(status.textContent, /Exported 2 classes/);
-    assert.doesNotMatch(status.textContent, /bundled/i);
     assert.equal(window.__uowRemoteScriptRan, undefined);
     assert.deepEqual(revoked, ['blob:test-1']);
     assert.equal(window.document.querySelector('a[download]'), null);
@@ -271,6 +443,7 @@ test('uses valid live UOW dates and sends a fixed anonymous request before parsi
 
 test('uses live 2027 teaching periods', async () => {
     const { blobs, dom, window } = createEnvironment();
+    await interactWithYearControlAndWait(window);
     window.document.querySelector('#sols-calendar-export-year').value = '2027';
 
     await clickExportAndWait(window);
@@ -279,10 +452,6 @@ test('uses live 2027 teaching periods', async () => {
     assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20270301T100000/);
     assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20270811T143000/);
     assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 19);
-    assert.doesNotMatch(
-        window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled/i
-    );
 
     dom.window.close();
 });
@@ -309,17 +478,16 @@ test('accepts a future year published by UOW without a script update', async () 
     const { blobs, dom, window } = createEnvironment({
         academicCalendarHtml: buildAcademicCalendarFixture(futurePeriods)
     });
-    window.document.querySelector('#sols-calendar-export-year').value = '2030';
 
     await clickExportAndWait(window);
 
+    assert.equal(
+        window.document.querySelector('#sols-calendar-export-year').value,
+        '2030'
+    );
     const ics = getICS(blobs);
     assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20300304T100000/);
     assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20300814T143000/);
-    assert.doesNotMatch(
-        window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled/i
-    );
 
     dom.window.close();
 });
@@ -357,23 +525,128 @@ test('ignores an incomplete unrelated year when the selected year is valid', asy
     const { blobs, dom, window } = createEnvironment({
         academicCalendarHtml: buildAcademicCalendarFixture(mixedPeriods)
     });
-    window.document.querySelector('#sols-calendar-export-year').value = '2026';
 
     await clickExportAndWait(window);
 
     assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
-    assert.doesNotMatch(
-        window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled/i
+    assert.deepEqual(
+        Array.from(
+            window.document.querySelector('#sols-calendar-export-year').options,
+            (option) => option.value
+        ),
+        ['2026']
     );
 
     dom.window.close();
 });
 
-test('falls back atomically to bundled 2026 dates when the network request fails', async () => {
+test('tolerates identical duplicate session anchors and panels', async () => {
+    const duplicateHtml = duplicateAcademicSessionPanel(
+        validAcademicCalendarHtml,
+        2026,
+        'autumn',
+        (panel) => {
+            const body = panel.querySelector('tbody');
+            const rows = Array.from(body.children).reverse();
+            body.append(...rows);
+        }
+    );
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: duplicateHtml
+    });
+
+    await clickExportAndWait(window);
+
+    assert.equal(downloads.length, 1);
+    assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
+    assert.deepEqual(
+        Array.from(
+            window.document.querySelector('#sols-calendar-export-year').options,
+            (option) => option.value
+        ),
+        ['2026', '2027']
+    );
+
+    dom.window.close();
+});
+
+test('rejects month names that only begin with a valid abbreviation', async () => {
+    const invalidHtml = validAcademicCalendarHtml.replaceAll(' Mar', ' Marzipan');
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: invalidHtml
+    });
+
+    await clickExportAndWait(window);
+
+    assert.equal(blobs.length, 0);
+    assert.equal(downloads.length, 0);
+    const status = window.document.querySelector('.sols-calendar-status');
+    assert.equal(status.dataset.state, 'error');
+    assert.match(status.textContent, /no complete academic calendar/i);
+
+    dom.window.close();
+});
+
+test('isolates a year with conflicting duplicate session panels', async () => {
+    const conflictingHtml = duplicateAcademicSessionPanel(
+        validAcademicCalendarHtml,
+        2026,
+        'autumn',
+        (panel) => {
+            panel.querySelector('tbody tr td:nth-child(2)').textContent =
+                '09 Mar – 24 Apr 2026';
+        }
+    );
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: conflictingHtml
+    });
+
+    await clickExportAndWait(window);
+
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['2027']
+    );
+    assert.equal(yearControl.value, '2027');
+    assert.equal(downloads.length, 1);
+    assert.match(getICS(blobs), /DTSTART;TZID=Australia\/Sydney:20270301T100000/);
+
+    dom.window.close();
+});
+
+test('accepts singular or plural week labels with ordinary spacing variation', async () => {
+    let activityIndex = 0;
+    const spacingVariantHtml = validAcademicCalendarHtml.replace(
+        /Lectures (Commence|Recommence) \(weeks (\d+) – (\d+)\)/g,
+        (_match, action, startWeek, endWeek) => {
+            const weekLabel = activityIndex % 2 === 0 ? 'week' : 'weeks';
+            activityIndex += 1;
+            return `Lectures ${action} (   ${weekLabel}   ${startWeek} – ${endWeek}   )`;
+        }
+    );
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: spacingVariantHtml
+    });
+
+    await clickExportAndWait(window);
+
+    assert.equal(downloads.length, 1);
+    assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
+
+    dom.window.close();
+});
+
+test('blocks a failed request without caching the failure and succeeds on retry', async () => {
+    let attempt = 0;
     const environment = createEnvironment({
         gmHandler(details) {
-            details.onerror();
+            attempt += 1;
+            if (attempt === 1) {
+                details.onerror();
+            } else {
+                details.onload(successfulResponse());
+            }
         }
     });
     const { blobs, dom, downloads, requests, window } = environment;
@@ -381,44 +654,27 @@ test('falls back atomically to bundled 2026 dates when the network request fails
     await clickExportAndWait(window);
 
     assert.equal(requests.length, 1);
-    assert.equal(downloads.length, 1);
-    const ics = getICS(blobs);
-    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20260302T100000/);
-    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20260812T143000/);
-    assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 19);
-
-    const status = window.document.querySelector('.sols-calendar-status');
-    assert.equal(status.dataset.state, 'success');
-    assert.match(status.textContent, /bundled UOW dates/);
-
-    dom.window.close();
-});
-
-test('falls back atomically to bundled 2027 dates when the network request fails', async () => {
-    const environment = createEnvironment({
-        gmHandler(details) {
-            details.onerror();
-        }
-    });
-    const { blobs, dom, downloads, window } = environment;
-    window.document.querySelector('#sols-calendar-export-year').value = '2027';
+    assert.equal(blobs.length, 0);
+    assert.equal(downloads.length, 0);
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').dataset.state,
+        'error'
+    );
 
     await clickExportAndWait(window);
 
+    assert.equal(requests.length, 2);
     assert.equal(downloads.length, 1);
-    const ics = getICS(blobs);
-    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20270301T100000/);
-    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20270811T143000/);
-    assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 19);
-
-    const status = window.document.querySelector('.sols-calendar-status');
-    assert.equal(status.dataset.state, 'success');
-    assert.match(status.textContent, /bundled UOW dates/);
+    assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').dataset.state,
+        'success'
+    );
 
     dom.window.close();
 });
 
-test('falls back when live teaching periods fail strict validation', async () => {
+test('excludes a year whose live teaching periods fail strict validation', async () => {
     const invalidHtml = validAcademicCalendarHtml.replace(
         'Lectures Recommence (weeks 8 – 13)',
         'Lectures Recommence (weeks 9 – 13)'
@@ -430,12 +686,65 @@ test('falls back when live teaching periods fail strict validation', async () =>
     await clickExportAndWait(window);
 
     const ics = getICS(blobs);
-    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20260302T100000/);
+    assert.match(ics, /DTSTART;TZID=Australia\/Sydney:20270301T100000/);
     assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 19);
+    assert.deepEqual(
+        Array.from(
+            window.document.querySelector('#sols-calendar-export-year').options,
+            (option) => option.value
+        ),
+        ['2027']
+    );
+
+    dom.window.close();
+});
+
+test('blocks export when no live year has a complete valid calendar', async () => {
+    const invalidHtml = validAcademicCalendarHtml.replaceAll(
+        'Lectures Recommence (weeks 8 – 13)',
+        'Lectures Recommence (weeks 9 – 13)'
+    );
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: invalidHtml
+    });
+
+    await clickExportAndWait(window);
+
+    assert.equal(blobs.length, 0);
+    assert.equal(downloads.length, 0);
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').dataset.state,
+        'error'
+    );
     assert.match(
         window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled UOW dates/
+        /no complete academic calendar/i
     );
+
+    dom.window.close();
+});
+
+test('fails closed when UOW returns more than sixteen candidate academic years', async () => {
+    const excessivePeriods = {};
+    for (let year = 2020; year <= 2036; year += 1) {
+        excessivePeriods[year] = structuredClone(teachingPeriods[2026]);
+    }
+    const { blobs, dom, downloads, window } = createEnvironment({
+        academicCalendarHtml: buildAcademicCalendarFixture(excessivePeriods)
+    });
+
+    await clickExportAndWait(window);
+
+    assert.equal(blobs.length, 0);
+    assert.equal(downloads.length, 0);
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    assert.deepEqual(
+        Array.from(yearControl.options, (option) => option.value),
+        ['']
+    );
+    const status = window.document.querySelector('.sols-calendar-status');
+    assert.equal(status.dataset.state, 'error');
+    assert.match(status.textContent, /too many academic years/i);
 
     dom.window.close();
 });
@@ -448,8 +757,8 @@ const invalidResponseCases = [
 ];
 
 for (const [name, overrides] of invalidResponseCases) {
-    test(`falls back when the live response has an invalid ${name}`, async () => {
-        const { blobs, dom, window } = createEnvironment({
+    test(`blocks export when the live response has an invalid ${name}`, async () => {
+        const { blobs, dom, downloads, window } = createEnvironment({
             gmHandler(details) {
                 details.onload(successfulResponse(validAcademicCalendarHtml, overrides));
             }
@@ -457,19 +766,22 @@ for (const [name, overrides] of invalidResponseCases) {
 
         await clickExportAndWait(window);
 
-        assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
-        assert.match(
-            window.document.querySelector('.sols-calendar-status').textContent,
-            /bundled UOW dates/
+        assert.equal(blobs.length, 0);
+        assert.equal(downloads.length, 0);
+        assert.equal(
+            window.document.querySelector('.sols-calendar-status').dataset.state,
+            'error'
         );
 
         dom.window.close();
     });
 }
 
-test('blocks an unknown year when neither live nor bundled dates support it', async () => {
+test('blocks a year that was not exposed by the validated UOW options', async () => {
     const { blobs, dom, downloads, errors, window } = createEnvironment();
     const yearControl = window.document.querySelector('#sols-calendar-export-year');
+    await interactWithYearControlAndWait(window);
+    yearControl.appendChild(new window.Option('2030', '2030'));
     yearControl.value = '2030';
 
     await clickExportAndWait(window);
@@ -481,7 +793,7 @@ test('blocks an unknown year when neither live nor bundled dates support it', as
     assert.equal(status.dataset.state, 'error');
     assert.match(
         status.textContent,
-        /^No verified UOW academic calendar is available for 2030: /
+        /Select an academic year published by UOW/
     );
     assert.equal(window.document.querySelector('button').disabled, false);
 
@@ -582,9 +894,9 @@ test('does not retain a fetched calendar after an export completes', async () =>
     dom.window.close();
 });
 
-test('retries the live request after a previous export fell back', async () => {
+test('retries from Export after loading years through the select failed', async () => {
     let attempt = 0;
-    const { dom, downloads, requests, window } = createEnvironment({
+    const { blobs, dom, downloads, requests, window } = createEnvironment({
         gmHandler(details) {
             attempt += 1;
             if (attempt === 1) {
@@ -595,19 +907,19 @@ test('retries the live request after a previous export fell back', async () => {
         }
     });
 
-    await clickExportAndWait(window);
-    assert.match(
-        window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled UOW dates/
+    await interactWithYearControlAndWait(window);
+    assert.equal(requests.length, 1);
+    assert.equal(downloads.length, 0);
+    assert.equal(blobs.length, 0);
+    assert.equal(
+        window.document.querySelector('.sols-calendar-status').dataset.state,
+        'error'
     );
 
     await clickExportAndWait(window);
-    assert.doesNotMatch(
-        window.document.querySelector('.sols-calendar-status').textContent,
-        /bundled/i
-    );
     assert.equal(requests.length, 2);
-    assert.equal(downloads.length, 2);
+    assert.equal(downloads.length, 1);
+    assert.equal((getICS(blobs).match(/BEGIN:VEVENT/g) || []).length, 19);
 
     dom.window.close();
 });

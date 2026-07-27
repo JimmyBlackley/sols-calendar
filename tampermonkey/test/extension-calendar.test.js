@@ -71,6 +71,13 @@ const extensionPopupScriptPaths = [
         'popup.js'
     )
 ];
+const nativeExtensionProductionPaths = [
+    ...extensionCalendarPaths,
+    ...extensionContentPaths,
+    ...extensionManifestPaths,
+    ...extensionPopupPaths,
+    ...extensionPopupScriptPaths
+];
 
 const SESSION_ROWS = {
     2026: {
@@ -216,9 +223,11 @@ function loadCalendarApi() {
 
     const api = {};
     for (const name of [
+        'chooseDefaultAcademicYear',
         'fetchAcademicCalendar',
         'foldLine',
         'generateICS',
+        'getAvailableAcademicYears',
         'parseAcademicCalendarHtml',
         'weekToISODate'
     ]) {
@@ -226,6 +235,151 @@ function loadCalendarApi() {
     }
     api.close = () => dom.window.close();
     return api;
+}
+
+function loadPopup(index, options = {}) {
+    const dom = new JSDOM(fs.readFileSync(extensionPopupPaths[index], 'utf8'), {
+        runScripts: 'outside-only',
+        url: `https://extension-${index}.invalid/popup.html`
+    });
+    const { window } = dom;
+    const downloads = [];
+    const errors = [];
+    const requests = [];
+    const sentMessages = [];
+    const revokedUrls = [];
+    const timetableUrl =
+        'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable';
+    const originalSetTimeout = window.setTimeout.bind(window);
+
+    window.AbortController = AbortController;
+    window.AbortSignal = AbortSignal;
+    window.TextEncoder = TextEncoder;
+    if (Number.isInteger(options.currentYear)) {
+        const NativeDate = window.Date;
+        const fixedNow = NativeDate.UTC(options.currentYear, 0, 1, 12);
+        window.Date = class FixedDate extends NativeDate {
+            constructor(...args) {
+                super(...(args.length > 0 ? args : [fixedNow]));
+            }
+
+            static now() {
+                return fixedNow;
+            }
+        };
+    }
+    window.URL.createObjectURL = () => `blob:test-${downloads.length + 1}`;
+    window.URL.revokeObjectURL = (url) => revokedUrls.push(url);
+    window.HTMLAnchorElement.prototype.click = function click() {
+        downloads.push({
+            filename: this.download,
+            url: this.href
+        });
+    };
+    window.setTimeout = (callback, delay, ...args) => {
+        if (delay === 60_000) {
+            callback(...args);
+            return 0;
+        }
+        return originalSetTimeout(callback, delay, ...args);
+    };
+    window.console.error = (...args) => errors.push(args);
+    window.fetch = async (url, requestOptions) => {
+        requests.push({ url, options: requestOptions });
+        if (options.fetchError) {
+            throw options.fetchError;
+        }
+
+        return {
+            status: 200,
+            ok: true,
+            url,
+            headers: {
+                get(name) {
+                    return name.toLowerCase() === 'content-type'
+                        ? 'text/html; charset=UTF-8'
+                        : null;
+                }
+            },
+            text: async () => options.academicCalendarHtml || buildUowCalendarHtml()
+        };
+    };
+
+    const tabs = {
+        async query() {
+            return [{
+                id: 42,
+                url: options.tabUrl || timetableUrl
+            }];
+        },
+        async sendMessage(tabId, message) {
+            sentMessages.push({ tabId, message });
+            return options.timetableResponse || {
+                events: [timetableEvent({
+                    session: 'Autumn',
+                    weeks: '1'
+                })]
+            };
+        }
+    };
+
+    if (index === 1) {
+        window.browser = { tabs };
+    } else {
+        window.chrome = {
+            tabs,
+            downloads: {
+                async download(downloadOptions) {
+                    downloads.push({
+                        filename: downloadOptions.filename,
+                        url: downloadOptions.url
+                    });
+                    return 1;
+                }
+            }
+        };
+    }
+
+    window.eval(fs.readFileSync(extensionCalendarPaths[index], 'utf8'));
+    window.eval(fs.readFileSync(extensionPopupScriptPaths[index], 'utf8'));
+
+    return {
+        dom,
+        downloads,
+        errors,
+        requests,
+        revokedUrls,
+        sentMessages,
+        window
+    };
+}
+
+async function waitForPopupInitialization(environment) {
+    const status = environment.window.document.getElementById('status');
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (!status.textContent.includes('Loading available academic years')) {
+            return;
+        }
+    }
+
+    throw new Error('Timed out waiting for popup academic-year initialization');
+}
+
+async function clickPopupExportAndWait(environment) {
+    const button = environment.window.document.getElementById('exportBtn');
+    const status = environment.window.document.getElementById('status');
+    button.click();
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (!button.disabled && !status.textContent.includes('Reading timetable')) {
+            return;
+        }
+    }
+
+    throw new Error('Timed out waiting for popup export');
 }
 
 function loadContentScript(contentPath, html = nativeTimetableFixture) {
@@ -358,6 +512,122 @@ test('follows changing CMS tab ids instead of hard-coding numeric ids', () => {
     }
 });
 
+test('tolerates identical duplicate standard-session anchors and panels', () => {
+    const api = loadCalendarApi();
+    const duplicate = buildSessionPanel(
+        2026,
+        'autumn',
+        [...SESSION_ROWS[2026].autumn].reverse(),
+        'tab-duplicate-2026-autumn'
+    );
+    const html = buildUowCalendarHtml()
+        .replace('</nav>', `${duplicate.anchor}</nav>`)
+        .replace('</main>', `${duplicate.panel}</main>`);
+
+    try {
+        const calendar = parseCalendar(api, html);
+        assert.deepEqual(Object.keys(calendar.years), ['2026', '2027']);
+        assert.equal(
+            api.weekToISODate('Autumn', 8, 2026, calendar),
+            '2026-04-27'
+        );
+    } finally {
+        api.close();
+    }
+});
+
+test('rejects month names that only begin with a valid abbreviation', () => {
+    const api = loadCalendarApi();
+    const html = buildUowCalendarHtml().replaceAll(' Mar', ' Marzipan');
+
+    try {
+        assert.throws(
+            () => parseCalendar(api, html),
+            /No complete UOW session calendars were found/
+        );
+    } finally {
+        api.close();
+    }
+});
+
+test('conflicting duplicate session panels invalidate only their academic year', () => {
+    const api = loadCalendarApi();
+    const conflicting = buildSessionPanel(
+        2026,
+        'autumn',
+        [
+            [1, 7, '09 Mar', '24 Apr 2026'],
+            [8, 13, '04 May', '12 Jun 2026']
+        ],
+        'tab-conflicting-2026-autumn'
+    );
+    const html = buildUowCalendarHtml()
+        .replace('</nav>', `${conflicting.anchor}</nav>`)
+        .replace('</main>', `${conflicting.panel}</main>`);
+
+    try {
+        assert.deepEqual(Object.keys(parseCalendar(api, html).years), ['2027']);
+        assert.throws(
+            () => api.parseAcademicCalendarHtml(
+                html,
+                'https://www.uow.edu.au/student/dates/',
+                2026
+            ),
+            /Conflicting UOW session tables for Autumn Session 2026/
+        );
+    } finally {
+        api.close();
+    }
+});
+
+test('accepts canonical singular or plural week labels with surrounding whitespace', () => {
+    const api = loadCalendarApi();
+    const html = buildUowCalendarHtml()
+        .replace(
+            /\(weeks 1 &ndash; 7\)/g,
+            '(   week   1 &ndash; 7   )'
+        )
+        .replace(
+            /\(weeks 8 &ndash; 13\)/g,
+            '(  weeks   8 &ndash; 13  )'
+        );
+
+    try {
+        const calendar = parseCalendar(api, html);
+        assert.equal(
+            api.weekToISODate('Autumn', 1, 2026, calendar),
+            '2026-03-02'
+        );
+        assert.equal(
+            api.weekToISODate('Autumn', 13, 2027, calendar),
+            '2027-05-31'
+        );
+    } finally {
+        api.close();
+    }
+});
+
+test('rejects more than sixteen academic-year candidates without partial output', () => {
+    const api = loadCalendarApi();
+    const extraYearAnchors = Array.from({ length: 15 }, (_, index) => {
+        const year = 2030 + index;
+        return `<a href="#tab-candidate-${year}">Autumn Session ${year}</a>`;
+    }).join('');
+    const html = buildUowCalendarHtml().replace(
+        '</nav>',
+        `${extraYearAnchors}</nav>`
+    );
+
+    try {
+        assert.throws(
+            () => parseCalendar(api, html),
+            /too many academic years/i
+        );
+    } finally {
+        api.close();
+    }
+});
+
 test('ignores an unrelated broken Summer range without contaminating standard sessions', () => {
     const api = loadCalendarApi();
     try {
@@ -437,27 +707,67 @@ test('keeps Annual session dates independent from Autumn and Spring', () => {
     }
 });
 
-test('rejects invalid teaching spans and missing standard sessions', () => {
+test('isolates invalid teaching spans and missing sessions by academic year', () => {
     const api = loadCalendarApi();
     try {
+        const invalidSpanHtml = buildUowCalendarHtml({
+            rowOverrides: {
+                '2026-autumn': [
+                    [1, 7, '02 Mar', '16 Apr 2026'],
+                    [8, 13, '27 Apr', '05 Jun 2026']
+                ]
+            }
+        });
         assert.throws(
-            () => parseCalendar(api, buildUowCalendarHtml({
-                rowOverrides: {
-                    '2026-autumn': [
-                        [1, 7, '02 Mar', '16 Apr 2026'],
-                        [8, 13, '27 Apr', '05 Jun 2026']
-                    ]
-                }
-            })),
+            () => api.parseAcademicCalendarHtml(
+                invalidSpanHtml,
+                'https://www.uow.edu.au/student/dates/',
+                2026
+            ),
             /Monday-to-Friday|span mismatch/i
         );
+        assert.deepEqual(
+            Object.keys(parseCalendar(api, invalidSpanHtml).years),
+            ['2027']
+        );
 
+        const missingSessionHtml = buildUowCalendarHtml({
+            omit: ['2027-spring']
+        });
         assert.throws(
-            () => parseCalendar(api, buildUowCalendarHtml({
-                omit: ['2027-spring']
-            })),
+            () => api.parseAcademicCalendarHtml(
+                missingSessionHtml,
+                'https://www.uow.edu.au/student/dates/',
+                2027
+            ),
             /missing spring 2027/i
         );
+        assert.deepEqual(
+            Object.keys(parseCalendar(api, missingSessionHtml).years),
+            ['2026']
+        );
+    } finally {
+        api.close();
+    }
+});
+
+test('sorts available years and chooses current, then earliest future, or no default', () => {
+    const api = loadCalendarApi();
+    try {
+        const calendar = {
+            years: {
+                2028: {},
+                2024: {},
+                2026: {}
+            }
+        };
+        const years = api.getAvailableAcademicYears(calendar);
+
+        assert.deepEqual(Array.from(years), [2024, 2026, 2028]);
+        assert.equal(api.chooseDefaultAcademicYear(years, 2026), 2026);
+        assert.equal(api.chooseDefaultAcademicYear(years, 2025), 2026);
+        assert.equal(api.chooseDefaultAcademicYear(years, 2030), null);
+        assert.equal(api.chooseDefaultAcademicYear([], 2026), null);
     } finally {
         api.close();
     }
@@ -601,6 +911,15 @@ test('keeps all native extension calendar implementations byte-identical', () =>
             `${calendarPath} drifted from chromium/calendar.js`
         );
     }
+
+    for (const productionPath of nativeExtensionProductionPaths) {
+        const source = fs.readFileSync(productionPath, 'utf8');
+        assert.doesNotMatch(
+            source,
+            /BUNDLED_ACADEMIC|20\d{2}-\d{2}-\d{2}/,
+            `${productionPath} contains static academic dates`
+        );
+    }
 });
 
 test('native calendar requests omit credentials and reject redirects before parsing', async () => {
@@ -724,6 +1043,7 @@ test('keeps native manifests scoped to required UOW hosts and content-only parsi
 
     for (const [index, manifestPath] of extensionManifestPaths.entries()) {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        assert.equal(manifest.version, '1.1.1');
         assert.deepEqual(
             [...(manifest.permissions || [])].sort(),
             [...expectedPermissions[index]].sort(),
@@ -757,14 +1077,18 @@ test('keeps native manifests scoped to required UOW hosts and content-only parsi
     }
 });
 
-test('loads calendar.js before popup.js and uses a numeric year input in every popup', () => {
+test('loads calendar.js before popup.js and starts every popup with a disabled year select', () => {
     for (const [index, popupPath] of extensionPopupPaths.entries()) {
         const dom = new JSDOM(fs.readFileSync(popupPath, 'utf8'));
         try {
-            const yearInput = dom.window.document.querySelector('#yearSelect');
-            assert.ok(yearInput, `${popupPath} has no academic-year control`);
-            assert.equal(yearInput.tagName, 'INPUT');
-            assert.equal(yearInput.type, 'number');
+            const yearSelect = dom.window.document.querySelector('#yearSelect');
+            assert.ok(yearSelect, `${popupPath} has no academic-year control`);
+            assert.equal(yearSelect.tagName, 'SELECT');
+            assert.equal(yearSelect.disabled, true);
+            assert.equal(
+                dom.window.document.querySelector('#exportBtn').disabled,
+                true
+            );
 
             const scripts = Array.from(
                 dom.window.document.querySelectorAll('script[src]'),
@@ -787,6 +1111,147 @@ test('loads calendar.js before popup.js and uses a numeric year input in every p
             );
         } finally {
             dom.window.close();
+        }
+    }
+});
+
+test('native popups load, sort, select, and reuse UOW academic calendars', async () => {
+    for (let index = 0; index < extensionPopupPaths.length; index += 1) {
+        const environment = loadPopup(index, {
+            currentYear: 2026
+        });
+        try {
+            await waitForPopupInitialization(environment);
+
+            const { document } = environment.window;
+            const yearSelect = document.getElementById('yearSelect');
+            const exportButton = document.getElementById('exportBtn');
+            assert.deepEqual(
+                Array.from(yearSelect.options, (option) => option.value),
+                ['2026', '2027'],
+                `${extensionPopupPaths[index]} did not use the validated UOW years`
+            );
+            assert.equal(yearSelect.value, '2026');
+            assert.equal(yearSelect.disabled, false);
+            assert.equal(exportButton.disabled, false);
+            assert.equal(environment.requests.length, 1);
+
+            yearSelect.value = '2027';
+            await clickPopupExportAndWait(environment);
+
+            assert.equal(environment.requests.length, 1);
+            assert.equal(environment.sentMessages.length, 1);
+            assert.equal(environment.downloads.length, 1);
+            assert.equal(
+                environment.downloads[0].filename,
+                'UOW_class_timetable.ics'
+            );
+            assert.match(
+                document.getElementById('status').textContent,
+                /Exported 1 classes using current UOW dates/
+            );
+            assert.equal(yearSelect.value, '2027');
+            assert.equal(yearSelect.disabled, false);
+            assert.equal(exportButton.disabled, false);
+        } finally {
+            environment.dom.window.close();
+        }
+    }
+});
+
+test('native popups exclude invalid years while keeping complete years selectable', async () => {
+    const html = buildUowCalendarHtml({
+        omit: ['2027-spring']
+    });
+
+    for (let index = 0; index < extensionPopupPaths.length; index += 1) {
+        const environment = loadPopup(index, {
+            academicCalendarHtml: html,
+            currentYear: 2026
+        });
+        try {
+            await waitForPopupInitialization(environment);
+
+            const yearSelect = environment.window.document.getElementById('yearSelect');
+            assert.deepEqual(
+                Array.from(yearSelect.options, (option) => option.value),
+                ['2026']
+            );
+            assert.equal(yearSelect.value, '2026');
+            assert.equal(yearSelect.disabled, false);
+            assert.equal(
+                environment.window.document.getElementById('exportBtn').disabled,
+                false
+            );
+        } finally {
+            environment.dom.window.close();
+        }
+    }
+});
+
+test('native popups require an explicit choice when UOW publishes only past years', async () => {
+    for (let index = 0; index < extensionPopupPaths.length; index += 1) {
+        const environment = loadPopup(index, {
+            currentYear: 2028
+        });
+        try {
+            await waitForPopupInitialization(environment);
+
+            const { document, Event } = environment.window;
+            const yearSelect = document.getElementById('yearSelect');
+            const exportButton = document.getElementById('exportBtn');
+            assert.deepEqual(
+                Array.from(yearSelect.options, (option) => option.value),
+                ['', '2026', '2027']
+            );
+            assert.equal(yearSelect.options[0].disabled, true);
+            assert.equal(yearSelect.value, '');
+            assert.equal(yearSelect.disabled, false);
+            assert.equal(exportButton.disabled, true);
+            assert.match(
+                document.getElementById('status').textContent,
+                /Select an academic year published by UOW/
+            );
+            assert.equal(environment.sentMessages.length, 0);
+            assert.equal(environment.downloads.length, 0);
+
+            yearSelect.value = '2027';
+            yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+            assert.equal(exportButton.disabled, false);
+            assert.equal(environment.sentMessages.length, 0);
+            assert.equal(environment.downloads.length, 0);
+        } finally {
+            environment.dom.window.close();
+        }
+    }
+});
+
+test('native popups disable export and explain UOW academic-year loading failures', async () => {
+    for (let index = 0; index < extensionPopupPaths.length; index += 1) {
+        const environment = loadPopup(index, {
+            fetchError: new Error('network unavailable')
+        });
+        try {
+            await waitForPopupInitialization(environment);
+
+            const { document } = environment.window;
+            const yearSelect = document.getElementById('yearSelect');
+            const exportButton = document.getElementById('exportBtn');
+            assert.equal(yearSelect.disabled, true);
+            assert.equal(exportButton.disabled, true);
+            assert.deepEqual(
+                Array.from(yearSelect.options, (option) => option.value),
+                ['']
+            );
+            assert.match(
+                document.getElementById('status').textContent,
+                /Unable to load available UOW academic years: network unavailable/
+            );
+            assert.equal(environment.downloads.length, 0);
+            assert.equal(environment.sentMessages.length, 0);
+        } finally {
+            environment.dom.window.close();
         }
     }
 });

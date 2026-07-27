@@ -160,7 +160,7 @@ final class ViewController: NSViewController {
             font: .systemFont(ofSize: 13, weight: .semibold)
         )
         let privacyDetail = makeLabel(
-            "Your timetable stays local. On export, Safari retrieves public dates from UOW.",
+            "Your timetable stays local. Opening the extension retrieves public dates from UOW.",
             font: .systemFont(ofSize: 12),
             color: .secondaryLabelColor
         )

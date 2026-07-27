@@ -60,7 +60,8 @@ so there is no toolbar popup to open.
 
 The userscript runs only on the exact SOLS timetable URL. Its
 `GM_xmlhttpRequest` grant and `@connect www.uow.edu.au` declaration are used
-only to retrieve UOW's public academic dates when the user starts an export.
+only to retrieve UOW's public academic dates after the user interacts with the
+academic-year control or starts an export.
 See [`tampermonkey/README.md`](tampermonkey/README.md) for development and test
 instructions.
 
@@ -69,45 +70,39 @@ instructions.
 1. Log into [SOLS](https://solss.uow.edu.au/sid/sols_login_ctl.login) and go to **Timetable > My Timetable**
 2. Click the extension icon in the toolbar, or use the page-embedded export
    panel if you installed the userscript
-3. Select the academic year and click **Export to ICS**
+3. Select one of the academic years currently published by UOW and click
+   **Export to ICS**
 4. Choose where to save `UOW_class_timetable.ics`
 5. Import the file into Google Calendar, Apple Calendar, Outlook, etc.
 
 ## Academic calendar dates
 
-When the user starts an export, the software makes a fixed `GET` request to
-`https://www.uow.edu.au/student/dates/` and reads the public teaching-week
-dates published there. This request does not contain timetable data, a student
-number, the selected year, or other query data. Request credentials and cookies
-are omitted. As with any ordinary web request, UOW still receives standard
-network metadata such as the user's IP address, browser networking details, and
-the time of the request.
+The browser extensions make a fixed `GET` request to
+`https://www.uow.edu.au/student/dates/` when their toolbar popup opens. The
+Tampermonkey userscript makes the same request only after the user interacts
+with its academic-year control or clicks **Export to ICS**; merely loading the
+SOLS timetable page does not trigger it.
 
-The returned HTML is handled only as data: bundled code parses the relevant
+The request does not contain timetable data, a student number, the selected
+year, or other query data. Request credentials and cookies are omitted. As with
+any ordinary web request, UOW still receives standard network metadata such as
+the user's IP address, browser networking details, and the time of the request.
+
+The returned HTML is handled only as data: locally installed code parses the
 academic-date tables, and no script or other code from the page is executed.
-The retrieved dates and the timetable remain in memory only for the current
-export and are not persisted.
+The year selector contains only years found in that live response for which
+the complete Autumn, Spring, and Annual teaching calendars pass validation.
+Users cannot enter an arbitrary year. The current year is selected when
+available; otherwise the earliest published future year is selected. If only
+past years remain, the user must choose one explicitly so an old calendar is
+never applied silently.
 
-If the online request fails or its data does not pass validation, the software
-uses its bundled, verified dates for the same academic year. If neither the
-online source nor the bundled fallback supports the selected year, the export
-stops instead of guessing dates.
-
-The year field defaults to the current year but remains editable. Once UOW
-publishes a complete standard-session calendar for a future year, that year can
-be used without adding another hard-coded option to the extension.
-
-## Bundled fallback dates
-
-| Year | Session | Week 1 | Mid-session break |
-|------|---------|--------|-------------------|
-| 2026 | Autumn | 2 Mar | 20–24 Apr (after week 7) |
-| 2026 | Spring | 27 Jul | 28 Sep – 2 Oct (after week 9) |
-| 2027 | Autumn | 1 Mar | 19–23 Apr (after week 7) |
-| 2027 | Spring | 26 Jul | 27 Sep – 1 Oct (after week 9) |
-
-Annual fallback data contains the complete official Week 1–26 teaching
-segments for both years.
+If the request fails, the response is invalid, or no complete academic year is
+available, the export stops with an error. The software does not guess dates.
+The response, validated dates, available-year list, and timetable data are
+kept only in browser memory while the extension popup or active userscript
+interaction needs them. They are never written to extension storage or
+otherwise persisted.
 
 
 ## TODO:

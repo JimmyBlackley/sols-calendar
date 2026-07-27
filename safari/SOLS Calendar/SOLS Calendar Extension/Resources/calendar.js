@@ -1,68 +1,13 @@
 /**
  * Runtime academic-calendar loading, validation, and ICS generation for UOW.
  *
- * The official UOW Key dates page is the primary source. A small, reviewed
- * last-known-good copy is bundled so exports can still work when UOW is
- * unavailable or browser website access has been denied.
+ * The official UOW Key dates page is the sole source of teaching dates.
  */
 
 const ACADEMIC_CALENDAR_URL = 'https://www.uow.edu.au/student/dates/';
 const ACADEMIC_CALENDAR_MAX_BYTES = 1_000_000;
-const BUNDLED_CALENDAR_VERIFIED_DATE = '2026-07-09';
-
-const BUNDLED_ACADEMIC_CALENDAR = {
-    source: {
-        type: 'bundled',
-        url: ACADEMIC_CALENDAR_URL,
-        editDate: BUNDLED_CALENDAR_VERIFIED_DATE
-    },
-    years: {
-        2026: {
-            autumn: {
-                segments: [
-                    { from: 1, to: 7, start: '2026-03-02', end: '2026-04-17' },
-                    { from: 8, to: 13, start: '2026-04-27', end: '2026-06-05' }
-                ]
-            },
-            spring: {
-                segments: [
-                    { from: 1, to: 9, start: '2026-07-27', end: '2026-09-25' },
-                    { from: 10, to: 13, start: '2026-10-05', end: '2026-10-30' }
-                ]
-            },
-            annual: {
-                segments: [
-                    { from: 1, to: 7, start: '2026-03-02', end: '2026-04-17' },
-                    { from: 8, to: 13, start: '2026-04-27', end: '2026-06-05' },
-                    { from: 14, to: 22, start: '2026-07-27', end: '2026-09-25' },
-                    { from: 23, to: 26, start: '2026-10-05', end: '2026-10-30' }
-                ]
-            }
-        },
-        2027: {
-            autumn: {
-                segments: [
-                    { from: 1, to: 7, start: '2027-03-01', end: '2027-04-16' },
-                    { from: 8, to: 13, start: '2027-04-26', end: '2027-06-04' }
-                ]
-            },
-            spring: {
-                segments: [
-                    { from: 1, to: 9, start: '2027-07-26', end: '2027-09-24' },
-                    { from: 10, to: 13, start: '2027-10-04', end: '2027-10-29' }
-                ]
-            },
-            annual: {
-                segments: [
-                    { from: 1, to: 7, start: '2027-03-01', end: '2027-04-16' },
-                    { from: 8, to: 13, start: '2027-04-26', end: '2027-06-04' },
-                    { from: 14, to: 22, start: '2027-07-26', end: '2027-09-24' },
-                    { from: 23, to: 26, start: '2027-10-04', end: '2027-10-29' }
-                ]
-            }
-        }
-    }
-};
+const ACADEMIC_CALENDAR_MAX_YEARS = 16;
+const ACADEMIC_CALENDAR_MAX_SESSION_ANCHORS = 96;
 
 const SESSION_WEEK_COUNTS = {
     autumn: 13,
@@ -248,7 +193,7 @@ function parseSessionPanel(panel, session, year) {
 
         const activity = normalizeCalendarText(cells[0].textContent);
         const weekMatch = activity.match(
-            /^Lectures (?:Commence|Recommence) \(weeks (\d+)\s*-\s*(\d+)\)$/i
+            /^Lectures (?:Commence|Recommence) \(\s*weeks?\s+(\d+)\s*-\s*(\d+)\s*\)$/i
         );
         if (!weekMatch) {
             continue;
@@ -264,6 +209,43 @@ function parseSessionPanel(panel, session, year) {
     }
 
     return validateSessionSegments(session, year, segments);
+}
+
+function parseAcademicCalendarYear(documentNode, year, anchors) {
+    const sessions = {};
+
+    for (const anchor of anchors) {
+        const title = normalizeCalendarText(anchor.textContent);
+        const titleMatch = title.match(/^(Autumn|Spring|Annual) Session (\d{4})$/i);
+        if (!titleMatch || Number(titleMatch[2]) !== year) {
+            continue;
+        }
+
+        const session = titleMatch[1].toLowerCase();
+        const targetId = anchor.getAttribute('href').slice(1);
+        const panel = documentNode.getElementById(targetId);
+        if (!panel) {
+            throw new Error(`UOW session panel is missing for ${title}`);
+        }
+
+        const parsedSession = parseSessionPanel(panel, session, year);
+        if (sessions[session]) {
+            if (JSON.stringify(sessions[session]) !== JSON.stringify(parsedSession)) {
+                throw new Error(`Conflicting UOW session tables for ${title}`);
+            }
+            continue;
+        }
+
+        sessions[session] = parsedSession;
+    }
+
+    for (const session of Object.keys(SESSION_WEEK_COUNTS)) {
+        if (!sessions[session]) {
+            throw new Error(`UOW calendar is missing ${session} ${year}`);
+        }
+    }
+
+    return sessions;
 }
 
 /**
@@ -283,6 +265,8 @@ function parseAcademicCalendarHtml(
     template.innerHTML = html;
     const documentNode = template.content;
     const years = {};
+    const anchorsByYear = new Map();
+    let recognizedAnchorCount = 0;
 
     for (const anchor of documentNode.querySelectorAll('a[href^="#tab-"]')) {
         const title = normalizeCalendarText(anchor.textContent);
@@ -291,35 +275,43 @@ function parseAcademicCalendarHtml(
             continue;
         }
 
-        const session = titleMatch[1].toLowerCase();
+        recognizedAnchorCount += 1;
+        if (recognizedAnchorCount > ACADEMIC_CALENDAR_MAX_SESSION_ANCHORS) {
+            throw new Error('UOW returned too many standard session links');
+        }
+
         const year = Number(titleMatch[2]);
         if (requestedYear !== null && year !== requestedYear) {
             continue;
         }
-        const targetId = anchor.getAttribute('href').slice(1);
-        const panel = documentNode.getElementById(targetId);
-        if (!panel) {
-            throw new Error(`UOW session panel is missing for ${title}`);
+        if (!anchorsByYear.has(year)) {
+            if (anchorsByYear.size >= ACADEMIC_CALENDAR_MAX_YEARS) {
+                throw new Error('UOW returned too many academic years');
+            }
+            anchorsByYear.set(year, []);
         }
-
-        years[year] ||= {};
-        if (years[year][session]) {
-            throw new Error(`Duplicate UOW session table for ${title}`);
-        }
-        years[year][session] = parseSessionPanel(panel, session, year);
+        anchorsByYear.get(year).push(anchor);
     }
 
-    const yearNumbers = Object.keys(years).map(Number);
-    if (yearNumbers.length === 0) {
+    if (anchorsByYear.size === 0) {
         throw new Error('No standard UOW session calendars were found');
     }
 
-    for (const year of yearNumbers) {
-        for (const session of Object.keys(SESSION_WEEK_COUNTS)) {
-            if (!years[year][session]) {
-                throw new Error(`UOW calendar is missing ${session} ${year}`);
-            }
+    const invalidYears = new Map();
+    for (const [year, anchors] of anchorsByYear) {
+        try {
+            years[year] = parseAcademicCalendarYear(documentNode, year, anchors);
+        } catch (error) {
+            invalidYears.set(year, error);
         }
+    }
+
+    if (requestedYear !== null && !years[requestedYear]) {
+        throw invalidYears.get(requestedYear)
+            || new Error(`UOW has not published standard session dates for ${requestedYear}`);
+    }
+    if (Object.keys(years).length === 0) {
+        throw new Error('No complete UOW session calendars were found');
     }
 
     const editDate = documentNode.querySelector('meta[name="edit.date"]')
@@ -373,37 +365,24 @@ async function fetchAcademicCalendar(fetchImplementation = fetch, requestedYear 
     }
 }
 
-async function loadAcademicCalendarForYear(year, fetchImplementation = fetch) {
-    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-        throw new Error('Enter a valid academic year');
+function getAvailableAcademicYears(calendar) {
+    return Object.keys(calendar?.years || {})
+        .map(Number)
+        .filter(Number.isInteger)
+        .sort((left, right) => left - right);
+}
+
+function chooseDefaultAcademicYear(years, currentYear = new Date().getFullYear()) {
+    const sortedYears = Array.from(new Set(years))
+        .filter(Number.isInteger)
+        .sort((left, right) => left - right);
+
+    if (sortedYears.includes(currentYear)) {
+        return currentYear;
     }
 
-    let liveError;
-    try {
-        const liveCalendar = await fetchAcademicCalendar(fetchImplementation, year);
-        if (!liveCalendar.years[year]) {
-            throw new Error(`UOW has not published standard session dates for ${year}`);
-        }
-        return {
-            calendar: liveCalendar,
-            source: 'live',
-            warning: null
-        };
-    } catch (error) {
-        liveError = error;
-    }
-
-    if (BUNDLED_ACADEMIC_CALENDAR.years[year]) {
-        return {
-            calendar: BUNDLED_ACADEMIC_CALENDAR,
-            source: 'bundled',
-            warning: liveError.message
-        };
-    }
-
-    throw new Error(
-        `Unable to load verified UOW academic dates for ${year}: ${liveError.message}`
-    );
+    const earliestFutureYear = sortedYears.find((year) => year > currentYear);
+    return earliestFutureYear ?? null;
 }
 
 function weekToISODate(sessionName, weekNumber, year, calendar) {

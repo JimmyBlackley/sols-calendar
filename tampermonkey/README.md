@@ -21,20 +21,25 @@ to that page, and generates the ICS file entirely in the browser.
 5. Open SOLS **Timetable > My Timetable**. The calendar export panel appears
    immediately above the timetable.
 
-When the user clicks **Export to ICS**, the script uses
-`GM_xmlhttpRequest` with `@connect www.uow.edu.au` to retrieve the fixed public
-URL `https://www.uow.edu.au/student/dates/`. The request contains no timetable
-or student data, omits cookies, and rejects redirects. The returned HTML is
-parsed only as academic-calendar data; no remote code is executed.
+After the user interacts with the academic-year control or clicks **Export to
+ICS**, the script uses `GM_xmlhttpRequest` with `@connect www.uow.edu.au` to
+retrieve the fixed public URL `https://www.uow.edu.au/student/dates/`. Merely
+loading the SOLS timetable page does not make this request. The request
+contains no timetable or student data, omits cookies, and rejects redirects.
+The returned HTML is parsed only as academic-calendar data; no remote code is
+executed.
 
-The online data is validated before use. If the request fails, the script uses
-bundled, verified dates for the same year; an unsupported year stops the
-export instead of being guessed. Calendar and timetable data are kept in
-memory only and are not persisted.
+The academic-year control is populated only with years discovered in the live
+response whose Autumn, Spring, and Annual teaching calendars are all present
+and pass validation. It does not accept an arbitrary year. The current year is
+selected when available, otherwise the earliest published future year is
+selected; a past year always requires an explicit choice. If the request fails,
+the response is invalid, or no complete year is available, the export stops
+instead of guessing dates.
 
-The academic-year field defaults to the current year and accepts future years.
-No script update is needed once UOW publishes a complete standard-session
-calendar for that year.
+The response, validated calendar, available-year list, and timetable data are
+kept only in memory while the active interaction needs them. They are not
+written to userscript storage or otherwise persisted.
 
 ## Development
 
