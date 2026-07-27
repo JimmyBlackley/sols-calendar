@@ -7,6 +7,9 @@ const { JSDOM } = require('jsdom');
 
 const repositoryRoot = path.resolve(__dirname, '..', '..');
 const chromiumCalendarPath = path.join(repositoryRoot, 'chromium', 'calendar.js');
+const keyDatesUrl = 'https://www.uow.edu.au/student/dates/';
+const timetableUrl =
+    'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable';
 const nativeTimetableFixture = fs.readFileSync(
     path.join(repositoryRoot, 'tampermonkey', 'test', 'fixture.html'),
     'utf8'
@@ -33,6 +36,18 @@ const extensionContentPaths = [
         'SOLS Calendar Extension',
         'Resources',
         'content.js'
+    )
+];
+const extensionBackgroundPaths = [
+    path.join(repositoryRoot, 'chromium', 'background.js'),
+    path.join(repositoryRoot, 'firefox', 'background.js'),
+    path.join(
+        repositoryRoot,
+        'safari',
+        'SOLS Calendar',
+        'SOLS Calendar Extension',
+        'Resources',
+        'background.js'
     )
 ];
 const extensionManifestPaths = [
@@ -74,6 +89,7 @@ const extensionPopupScriptPaths = [
 const nativeExtensionProductionPaths = [
     ...extensionCalendarPaths,
     ...extensionContentPaths,
+    ...extensionBackgroundPaths,
     ...extensionManifestPaths,
     ...extensionPopupPaths,
     ...extensionPopupScriptPaths
@@ -225,6 +241,7 @@ function loadCalendarApi() {
     for (const name of [
         'chooseDefaultAcademicYear',
         'fetchAcademicCalendar',
+        'fetchAcademicCalendarSource',
         'foldLine',
         'generateICS',
         'getAvailableAcademicYears',
@@ -248,8 +265,6 @@ function loadPopup(index, options = {}) {
     const requests = [];
     const sentMessages = [];
     const revokedUrls = [];
-    const timetableUrl =
-        'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable';
     const originalSetTimeout = window.setTimeout.bind(window);
 
     window.AbortController = AbortController;
@@ -286,24 +301,15 @@ function loadPopup(index, options = {}) {
     window.console.error = (...args) => errors.push(args);
     window.fetch = async (url, requestOptions) => {
         requests.push({ url, options: requestOptions });
-        if (options.fetchError) {
-            throw options.fetchError;
-        }
-
-        return {
-            status: 200,
-            ok: true,
-            url,
-            headers: {
-                get(name) {
-                    return name.toLowerCase() === 'content-type'
-                        ? 'text/html; charset=UTF-8'
-                        : null;
-                }
-            },
-            text: async () => options.academicCalendarHtml || buildUowCalendarHtml()
-        };
+        throw new Error('The popup must reuse the content-script calendar');
     };
+
+    window.eval(fs.readFileSync(extensionCalendarPaths[index], 'utf8'));
+    const parseAcademicCalendar = window.eval('parseAcademicCalendarHtml');
+    const contentCalendar = parseAcademicCalendar(
+        options.academicCalendarHtml || buildUowCalendarHtml(),
+        keyDatesUrl
+    );
 
     const tabs = {
         async query() {
@@ -314,6 +320,18 @@ function loadPopup(index, options = {}) {
         },
         async sendMessage(tabId, message) {
             sentMessages.push({ tabId, message });
+            if (message?.action === 'getAcademicCalendar') {
+                const calendarError = options.calendarError || options.fetchError;
+                if (calendarError) {
+                    return { error: calendarError.message };
+                }
+                return options.academicCalendarResponse || {
+                    calendar: contentCalendar
+                };
+            }
+            if (message?.action !== 'parseTimetable') {
+                throw new Error(`Unexpected popup message: ${message?.action}`);
+            }
             return options.timetableResponse || {
                 events: [timetableEvent({
                     session: 'Autumn',
@@ -340,7 +358,6 @@ function loadPopup(index, options = {}) {
         };
     }
 
-    window.eval(fs.readFileSync(extensionCalendarPaths[index], 'utf8'));
     window.eval(fs.readFileSync(extensionPopupScriptPaths[index], 'utf8'));
 
     return {
@@ -382,12 +399,133 @@ async function clickPopupExportAndWait(environment) {
     throw new Error('Timed out waiting for popup export');
 }
 
-function loadContentScript(contentPath, html = nativeTimetableFixture) {
+function createDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
+}
+
+function academicCalendarSource(html = buildUowCalendarHtml()) {
+    return {
+        source: {
+            html,
+            url: keyDatesUrl
+        }
+    };
+}
+
+function loadContentScript(
+    contentPath,
+    html = nativeTimetableFixture,
+    options = {}
+) {
+    const index = extensionContentPaths.indexOf(contentPath);
+    assert.notEqual(index, -1, `Unknown content script: ${contentPath}`);
     const dom = new JSDOM(html, {
         runScripts: 'outside-only',
-        url: 'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable'
+        url: timetableUrl
     });
     const listeners = [];
+    const errors = [];
+    const runtimeMessages = [];
+    const runtime = {
+        onMessage: {
+            addListener(listener) {
+                listeners.push(listener);
+            }
+        },
+        sendMessage(message) {
+            runtimeMessages.push(message);
+            try {
+                const response = options.sourceHandler
+                    ? options.sourceHandler(message, runtimeMessages.length)
+                    : academicCalendarSource(options.academicCalendarHtml);
+                return Promise.resolve(response);
+            } catch (error) {
+                return Promise.reject(error);
+            }
+        }
+    };
+
+    dom.window.console.error = (...args) => errors.push(args);
+    if (index === 1) {
+        dom.window.browser = { runtime };
+    } else {
+        dom.window.chrome = { runtime };
+    }
+
+    dom.window.eval([
+        fs.readFileSync(extensionCalendarPaths[index], 'utf8'),
+        fs.readFileSync(contentPath, 'utf8')
+    ].join('\n'));
+    assert.equal(listeners.length, 1, `${contentPath} did not register one listener`);
+    return {
+        dom,
+        errors,
+        listener: listeners[0],
+        runtimeMessages
+    };
+}
+
+async function requestContentMessage(environment, action) {
+    let callbackCalled = false;
+    let callbackResponse;
+    let resolveAsyncResponse;
+    const asyncResponse = new Promise((resolve) => {
+        resolveAsyncResponse = resolve;
+    });
+    const listenerResult = environment.listener(
+        { action },
+        {},
+        (value) => {
+            callbackCalled = true;
+            callbackResponse = value;
+            resolveAsyncResponse(value);
+        }
+    );
+
+    if (callbackCalled) {
+        return callbackResponse;
+    }
+    if (listenerResult === true) {
+        return asyncResponse;
+    }
+    return undefined;
+}
+
+async function requestParsedTimetable(contentPath, environment) {
+    assert.ok(extensionContentPaths.includes(contentPath));
+    return requestContentMessage(environment, 'parseTimetable');
+}
+
+function successfulExtensionResponse(overrides = {}) {
+    return {
+        status: 200,
+        ok: true,
+        url: keyDatesUrl,
+        headers: {
+            get(name) {
+                return name.toLowerCase() === 'content-type'
+                    ? 'text/html; charset=UTF-8'
+                    : null;
+            }
+        },
+        text: async () => buildUowCalendarHtml(),
+        ...overrides
+    };
+}
+
+function loadBackground(index, options = {}) {
+    const backgroundPath = extensionBackgroundPaths[index];
+    const calendarPath = extensionCalendarPaths[index];
+    const listeners = [];
+    const requests = [];
+    const importedScripts = [];
+    const errors = [];
     const runtime = {
         onMessage: {
             addListener(listener) {
@@ -395,38 +533,81 @@ function loadContentScript(contentPath, html = nativeTimetableFixture) {
             }
         }
     };
+    const context = vm.createContext({
+        AbortController,
+        AbortSignal,
+        Date,
+        Math,
+        TextEncoder,
+        URL,
+        clearTimeout,
+        console: {
+            error: (...args) => errors.push(args)
+        },
+        fetch: async (url, requestOptions) => {
+            requests.push({ options: requestOptions, url });
+            if (options.fetchHandler) {
+                return options.fetchHandler(url, requestOptions, requests.length);
+            }
+            return successfulExtensionResponse();
+        },
+        setTimeout
+    });
 
-    if (contentPath === extensionContentPaths[1]) {
-        dom.window.browser = { runtime };
+    const loadCalendarRuntime = () => {
+        vm.runInContext(fs.readFileSync(calendarPath, 'utf8'), context, {
+            filename: calendarPath
+        });
+    };
+    context.importScripts = (...scriptPaths) => {
+        for (const scriptPath of scriptPaths) {
+            importedScripts.push(scriptPath);
+            assert.equal(scriptPath, 'calendar.js');
+            loadCalendarRuntime();
+        }
+    };
+
+    if (index === 1) {
+        context.browser = { runtime };
+        loadCalendarRuntime();
     } else {
-        dom.window.chrome = { runtime };
+        context.chrome = { runtime };
     }
 
-    dom.window.eval(fs.readFileSync(contentPath, 'utf8'));
-    assert.equal(listeners.length, 1, `${contentPath} did not register one listener`);
-    return { dom, listener: listeners[0] };
+    vm.runInContext(fs.readFileSync(backgroundPath, 'utf8'), context, {
+        filename: backgroundPath
+    });
+    assert.equal(listeners.length, 1, `${backgroundPath} did not register one listener`);
+
+    return {
+        context,
+        errors,
+        importedScripts,
+        listener: listeners[0],
+        requests
+    };
 }
 
-async function requestParsedTimetable(contentPath, environment) {
-    if (contentPath === extensionContentPaths[1]) {
-        return environment.listener({ action: 'parseTimetable' }, {});
-    }
-
-    let response;
-    environment.listener(
-        { action: 'parseTimetable' },
-        {},
-        (value) => {
-            response = value;
-        }
-    );
-    return response;
+async function requestBackground(
+    environment,
+    request = { action: 'loadAcademicCalendarSource' },
+    sender = { url: timetableUrl }
+) {
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => {
+        resolveResponse = resolve;
+    });
+    const listenerResult = environment.listener(request, sender, resolveResponse);
+    return {
+        listenerResult,
+        response: await responsePromise
+    };
 }
 
 function parseCalendar(api, html = buildUowCalendarHtml()) {
     return api.parseAcademicCalendarHtml(
         html,
-        'https://www.uow.edu.au/student/dates/'
+        keyDatesUrl
     );
 }
 
@@ -902,13 +1083,22 @@ test('escapes ICS text and folds every physical line to at most 75 UTF-8 octets'
     }
 });
 
-test('keeps all native extension calendar implementations byte-identical', () => {
+test('keeps all native extension calendar and content implementations aligned', () => {
     const expected = fs.readFileSync(extensionCalendarPaths[0]);
     for (const calendarPath of extensionCalendarPaths.slice(1)) {
         assert.deepEqual(
             fs.readFileSync(calendarPath),
             expected,
             `${calendarPath} drifted from chromium/calendar.js`
+        );
+    }
+
+    const expectedContent = fs.readFileSync(extensionContentPaths[0]);
+    for (const contentPath of extensionContentPaths.slice(1)) {
+        assert.deepEqual(
+            fs.readFileSync(contentPath),
+            expectedContent,
+            `${contentPath} drifted from chromium/content.js`
         );
     }
 
@@ -954,6 +1144,301 @@ test('native calendar requests omit credentials and reject redirects before pars
         assert.deepEqual(Object.keys(calendar.years), ['2026']);
     } finally {
         api.close();
+    }
+});
+
+test('native backgrounds fetch Key Dates without a DOM or caller-supplied data', async () => {
+    for (let index = 0; index < extensionBackgroundPaths.length; index += 1) {
+        const environment = loadBackground(index);
+        assert.equal(vm.runInContext('typeof document', environment.context), 'undefined');
+        assert.deepEqual(
+            environment.importedScripts,
+            index === 1 ? [] : ['calendar.js']
+        );
+
+        const request = {
+            action: 'loadAcademicCalendarSource',
+            url: 'https://attacker.invalid/private',
+            year: 2099,
+            timetable: [{ studentNumber: '1234567' }]
+        };
+        const result = await requestBackground(environment, request);
+
+        assert.equal(result.listenerResult, true);
+        assert.equal(result.response.error, undefined);
+        assert.equal(result.response.source.url, keyDatesUrl);
+        assert.match(result.response.source.html, /Autumn Session 2026/);
+        assert.equal(environment.requests.length, 1);
+
+        const observed = environment.requests[0];
+        assert.equal(observed.url, keyDatesUrl);
+        assert.deepEqual(
+            Object.keys(observed.options).sort(),
+            [
+                'cache',
+                'credentials',
+                'method',
+                'redirect',
+                'referrerPolicy',
+                'signal'
+            ]
+        );
+        assert.equal(observed.options.method, 'GET');
+        assert.equal(observed.options.credentials, 'omit');
+        assert.equal(observed.options.cache, 'no-store');
+        assert.equal(observed.options.redirect, 'error');
+        assert.equal(observed.options.referrerPolicy, 'no-referrer');
+        assert.ok(observed.options.signal instanceof AbortSignal);
+    }
+});
+
+test('native backgrounds reject every non-exact timetable sender before fetching', async () => {
+    const rejectedSenders = [
+        {},
+        { url: 'https://solss.uow.edu.au/' },
+        {
+            url:
+                'https://solss.uow.edu.au/sid/'
+                + 'sols_tutorial_enrolment.my_timetable.evil'
+        },
+        {
+            url:
+                'https://solss.uow.edu.au.evil.invalid/sid/'
+                + 'sols_tutorial_enrolment.my_timetable'
+        },
+        { url: 'https://extension.invalid/popup.html' },
+        { url: 'not a URL' }
+    ];
+
+    for (let index = 0; index < extensionBackgroundPaths.length; index += 1) {
+        const environment = loadBackground(index);
+        for (const sender of rejectedSenders) {
+            const result = await requestBackground(
+                environment,
+                { action: 'loadAcademicCalendarSource' },
+                sender
+            );
+            assert.equal(result.listenerResult, false);
+            assert.equal(
+                result.response.error,
+                'Academic calendar request rejected'
+            );
+            assert.deepEqual(Object.keys(result.response), ['error']);
+        }
+        assert.equal(environment.requests.length, 0);
+
+        const accepted = await requestBackground(
+            environment,
+            { action: 'loadAcademicCalendarSource' },
+            { tab: { url: `${timetableUrl}?view=mobile` } }
+        );
+        assert.equal(accepted.listenerResult, true);
+        assert.equal(accepted.response.error, undefined);
+        assert.equal(environment.requests.length, 1);
+    }
+});
+
+test('native backgrounds share an in-flight request and enforce response boundaries', async () => {
+    for (let index = 0; index < extensionBackgroundPaths.length; index += 1) {
+        const deferred = createDeferred();
+        const environment = loadBackground(index, {
+            fetchHandler: () => deferred.promise
+        });
+        const first = requestBackground(environment);
+        const second = requestBackground(environment);
+
+        assert.equal(environment.requests.length, 1);
+        deferred.resolve(successfulExtensionResponse());
+        const [firstResult, secondResult] = await Promise.all([first, second]);
+        assert.equal(firstResult.response.error, undefined);
+        assert.deepEqual(firstResult.response, secondResult.response);
+
+        await requestBackground(environment);
+        assert.equal(
+            environment.requests.length,
+            2,
+            'the background must not persist a completed response'
+        );
+    }
+
+    const failureCases = [
+        [
+            'HTTP status',
+            () => successfulExtensionResponse({ status: 503, ok: false }),
+            /HTTP 503/
+        ],
+        [
+            'final URL',
+            () => successfulExtensionResponse({
+                url: 'https://www.uow.edu.au/student/dates/moved/'
+            }),
+            /unexpected URL/
+        ],
+        [
+            'content type',
+            () => successfulExtensionResponse({
+                headers: { get: () => 'application/json' }
+            }),
+            /was not HTML/
+        ],
+        [
+            'empty body',
+            () => successfulExtensionResponse({ text: async () => '' }),
+            /invalid size/
+        ],
+        [
+            'oversized body',
+            () => successfulExtensionResponse({
+                text: async () => 'x'.repeat(1_000_001)
+            }),
+            /invalid size/
+        ],
+        [
+            'network failure',
+            () => {
+                throw new Error('redirect blocked');
+            },
+            /redirect blocked/
+        ]
+    ];
+
+    for (const [name, responseFactory, expectedError] of failureCases) {
+        const environment = loadBackground(0, {
+            fetchHandler: responseFactory
+        });
+        const result = await requestBackground(environment);
+        assert.match(result.response.error, expectedError, name);
+        assert.equal(result.response.source, undefined, name);
+        assert.equal(environment.requests.length, 1, name);
+    }
+});
+
+test('content injection prefetches exactly once and reuses pending and successful data', async () => {
+    for (const contentPath of extensionContentPaths) {
+        const deferred = createDeferred();
+        const environment = loadContentScript(
+            contentPath,
+            nativeTimetableFixture,
+            { sourceHandler: () => deferred.promise }
+        );
+
+        assert.deepEqual(
+            JSON.parse(JSON.stringify(environment.runtimeMessages)),
+            [{ action: 'loadAcademicCalendarSource' }]
+        );
+        assert.deepEqual(
+            Object.keys(environment.runtimeMessages[0]),
+            ['action'],
+            'the prefetch payload exposed URL, year, or timetable data'
+        );
+
+        const first = requestContentMessage(environment, 'getAcademicCalendar');
+        const second = requestContentMessage(environment, 'getAcademicCalendar');
+        assert.equal(environment.runtimeMessages.length, 1);
+
+        deferred.resolve(academicCalendarSource());
+        const [firstResponse, secondResponse] = await Promise.all([first, second]);
+        assert.ok(
+            firstResponse.calendar,
+            `${contentPath}: ${firstResponse.error || 'missing calendar'}`
+        );
+        assert.deepEqual(
+            Object.keys(firstResponse.calendar.years),
+            ['2026', '2027']
+        );
+        assert.deepEqual(firstResponse, secondResponse);
+        assert.equal(environment.runtimeMessages.length, 1);
+
+        const cached = await requestContentMessage(
+            environment,
+            'getAcademicCalendar'
+        );
+        assert.deepEqual(cached, firstResponse);
+        assert.equal(environment.runtimeMessages.length, 1);
+        environment.dom.window.close();
+    }
+});
+
+test('content calendar lookup retries only after a failed page-load prefetch', async () => {
+    for (const contentPath of extensionContentPaths) {
+        let attempts = 0;
+        const environment = loadContentScript(
+            contentPath,
+            nativeTimetableFixture,
+            {
+                sourceHandler() {
+                    attempts += 1;
+                    if (attempts === 1) {
+                        return Promise.reject(new Error('network unavailable'));
+                    }
+                    return academicCalendarSource();
+                }
+            }
+        );
+
+        for (let attempt = 0; attempt < 20 && environment.errors.length === 0; attempt += 1) {
+            await new Promise((resolve) => setImmediate(resolve));
+        }
+        assert.equal(environment.errors.length, 1);
+        assert.equal(attempts, 1);
+
+        const retried = await requestContentMessage(
+            environment,
+            'getAcademicCalendar'
+        );
+        assert.ok(
+            retried.calendar,
+            `${contentPath}: ${retried.error || 'missing calendar'}`
+        );
+        assert.deepEqual(Object.keys(retried.calendar.years), ['2026', '2027']);
+        assert.equal(attempts, 2);
+
+        await requestContentMessage(environment, 'getAcademicCalendar');
+        assert.equal(attempts, 2, 'successful retry was not reused');
+        environment.dom.window.close();
+    }
+});
+
+test('page-load prefetch reaches each platform background once without reading timetable data', async () => {
+    for (let index = 0; index < extensionContentPaths.length; index += 1) {
+        const background = loadBackground(index);
+        const content = loadContentScript(
+            extensionContentPaths[index],
+            nativeTimetableFixture,
+            {
+                sourceHandler(message) {
+                    return new Promise((resolve) => {
+                        const keepAlive = background.listener(
+                            message,
+                            { url: timetableUrl },
+                            resolve
+                        );
+                        assert.equal(keepAlive, true);
+                    });
+                }
+            }
+        );
+
+        const response = await requestContentMessage(
+            content,
+            'getAcademicCalendar'
+        );
+        assert.ok(
+            response.calendar,
+            `${extensionContentPaths[index]}: ${response.error || 'missing calendar'}`
+        );
+        assert.deepEqual(Object.keys(response.calendar.years), ['2026', '2027']);
+        assert.equal(content.runtimeMessages.length, 1);
+        assert.equal(background.requests.length, 1);
+        assert.equal(background.requests[0].url, keyDatesUrl);
+
+        const parsed = await requestParsedTimetable(
+            extensionContentPaths[index],
+            content
+        );
+        assert.equal(parsed.events.length, 2);
+        assert.equal(background.requests.length, 1);
+        content.dom.window.close();
     }
 });
 
@@ -1031,7 +1516,7 @@ test('native content scripts return an error instead of silently skipping malfor
     }
 });
 
-test('keeps native manifests scoped to required UOW hosts and content-only parsing', () => {
+test('keeps native manifests scoped and configures platform-correct backgrounds', () => {
     const calendarHost = 'https://www.uow.edu.au/*';
     const safariTimetableHost =
         'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*';
@@ -1040,10 +1525,16 @@ test('keeps native manifests scoped to required UOW hosts and content-only parsi
         ['activeTab'],
         ['activeTab']
     ];
+    const expectedBackgrounds = [
+        { service_worker: 'background.js' },
+        { scripts: ['calendar.js', 'background.js'] },
+        { service_worker: 'background.js' }
+    ];
 
     for (const [index, manifestPath] of extensionManifestPaths.entries()) {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        assert.equal(manifest.version, '1.1.1');
+        assert.equal(manifest.version, '1.1.2');
+        assert.match(manifest.description, /^Unofficial tool\b/);
         assert.deepEqual(
             [...(manifest.permissions || [])].sort(),
             [...expectedPermissions[index]].sort(),
@@ -1065,14 +1556,19 @@ test('keeps native manifests scoped to required UOW hosts and content-only parsi
             expectedHosts.sort(),
             `${manifestPath} has unexpected host permissions`
         );
+        assert.deepEqual(
+            manifest.background,
+            expectedBackgrounds[index],
+            `${manifestPath} has the wrong MV3 background environment`
+        );
 
         const contentScripts = manifest.content_scripts || [];
         assert.ok(contentScripts.length > 0, `${manifestPath} has no content script`);
         const loadedScripts = contentScripts.flatMap((entry) => entry.js || []);
         assert.deepEqual(
             loadedScripts,
-            ['content.js'],
-            `${manifestPath} content scripts must not load calendar.js`
+            ['calendar.js', 'content.js'],
+            `${manifestPath} must load the calendar parser before content.js`
         );
     }
 });
@@ -1088,6 +1584,10 @@ test('loads calendar.js before popup.js and starts every popup with a disabled y
             assert.equal(
                 dom.window.document.querySelector('#exportBtn').disabled,
                 true
+            );
+            assert.match(
+                dom.window.document.querySelector('.disclaimer').textContent,
+                /Unofficial independent tool[\s\S]*not affiliated with[\s\S]*UOW/
             );
 
             const scripts = Array.from(
@@ -1134,13 +1634,20 @@ test('native popups load, sort, select, and reuse UOW academic calendars', async
             assert.equal(yearSelect.value, '2026');
             assert.equal(yearSelect.disabled, false);
             assert.equal(exportButton.disabled, false);
-            assert.equal(environment.requests.length, 1);
+            assert.equal(environment.requests.length, 0);
+            assert.deepEqual(
+                environment.sentMessages.map(({ message }) => message.action),
+                ['getAcademicCalendar']
+            );
 
             yearSelect.value = '2027';
             await clickPopupExportAndWait(environment);
 
-            assert.equal(environment.requests.length, 1);
-            assert.equal(environment.sentMessages.length, 1);
+            assert.equal(environment.requests.length, 0);
+            assert.deepEqual(
+                environment.sentMessages.map(({ message }) => message.action),
+                ['getAcademicCalendar', 'parseTimetable']
+            );
             assert.equal(environment.downloads.length, 1);
             assert.equal(
                 environment.downloads[0].filename,
@@ -1212,14 +1719,18 @@ test('native popups require an explicit choice when UOW publishes only past year
                 document.getElementById('status').textContent,
                 /Select an academic year published by UOW/
             );
-            assert.equal(environment.sentMessages.length, 0);
+            assert.equal(environment.sentMessages.length, 1);
+            assert.equal(
+                environment.sentMessages[0].message.action,
+                'getAcademicCalendar'
+            );
             assert.equal(environment.downloads.length, 0);
 
             yearSelect.value = '2027';
             yearSelect.dispatchEvent(new Event('change', { bubbles: true }));
 
             assert.equal(exportButton.disabled, false);
-            assert.equal(environment.sentMessages.length, 0);
+            assert.equal(environment.sentMessages.length, 1);
             assert.equal(environment.downloads.length, 0);
         } finally {
             environment.dom.window.close();
@@ -1249,7 +1760,12 @@ test('native popups disable export and explain UOW academic-year loading failure
                 /Unable to load available UOW academic years: network unavailable/
             );
             assert.equal(environment.downloads.length, 0);
-            assert.equal(environment.sentMessages.length, 0);
+            assert.equal(environment.requests.length, 0);
+            assert.equal(environment.sentMessages.length, 1);
+            assert.equal(
+                environment.sentMessages[0].message.action,
+                'getAcademicCalendar'
+            );
         } finally {
             environment.dom.window.close();
         }

@@ -3,13 +3,22 @@
  * timetable locally, generate the ICS in the extension popup, and download it.
  */
 
-const TIMETABLE_URL_PREFIX =
-    'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable';
+const TIMETABLE_ORIGIN = 'https://solss.uow.edu.au';
+const TIMETABLE_PATH = '/sid/sols_tutorial_enrolment.my_timetable';
 const DOWNLOAD_FILENAME = 'UOW_class_timetable.ics';
 const yearSelect = document.getElementById('yearSelect');
 const exportButton = document.getElementById('exportBtn');
 const status = document.getElementById('status');
 let academicCalendar = null;
+
+function isTimetableUrl(value) {
+    try {
+        const url = new URL(value);
+        return url.origin === TIMETABLE_ORIGIN && url.pathname === TIMETABLE_PATH;
+    } catch {
+        return false;
+    }
+}
 
 function setStatus(status, state, message, showSpinner = false) {
     status.className = `status ${state}`;
@@ -70,11 +79,17 @@ async function initializeAcademicYears() {
 
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url?.startsWith(TIMETABLE_URL_PREFIX)) {
+        if (!isTimetableUrl(tab?.url)) {
             throw new Error('Please navigate to your SOLS My Timetable page first');
         }
 
-        const calendar = await fetchAcademicCalendar();
+        const response = await chrome.tabs.sendMessage(tab.id, {
+            action: 'getAcademicCalendar'
+        });
+        if (response?.error) {
+            throw new Error(response.error);
+        }
+        const calendar = response?.calendar;
         populateAcademicYears(calendar);
         academicCalendar = calendar;
         yearSelect.disabled = false;
@@ -125,7 +140,7 @@ exportButton.addEventListener('click', async () => {
         }
 
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url?.startsWith(TIMETABLE_URL_PREFIX)) {
+        if (!isTimetableUrl(tab?.url)) {
             throw new Error('Please navigate to your SOLS My Timetable page first');
         }
 

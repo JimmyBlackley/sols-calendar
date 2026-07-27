@@ -10,6 +10,9 @@ userscript. It exports your University of Wollongong (UOW) SOLS timetable into
 a standard ICS calendar file. This privacy policy describes how the Software
 handles user data.
 
+The Software is an unofficial independent project. It is not affiliated with,
+endorsed by, or supported by UOW.
+
 ## Data Collection
 
 The Software reads timetable data **only** from the UOW SOLS "My Timetable" page (`https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*`). The data read includes:
@@ -20,20 +23,22 @@ The Software reads timetable data **only** from the UOW SOLS "My Timetable" page
 - Room/location information
 - Teaching weeks
 
-The browser extension packages retrieve UOW's public academic calendar page
-with a fixed `GET` request to `https://www.uow.edu.au/student/dates/` when the
-user opens the extension popup. The Tampermonkey userscript makes the same
-request only after the user interacts with its academic-year control or clicks
-"Export to ICS"; loading the SOLS timetable page alone does not trigger the
-request. The Software does not read other browsing activity or inspect the
-content of pages other than the two URLs described above.
+When the exact My Timetable document loads, the browser extension content
+script or Tampermonkey userscript automatically starts one fixed `GET` request
+to UOW's public academic calendar page at
+`https://www.uow.edu.au/student/dates/`. A successful result is reused for the
+life of that My Timetable document. A failed automatic request is not repeated
+in a loop; a later user action that opens the extension popup or uses the
+userscript's year control or Export button may retry it. The Software does not
+read other browsing activity or inspect the content of pages other than the
+two URLs described above.
 
 ## Data Usage
 
 All collected timetable data is used **solely** to generate an ICS calendar file on the user's device. Specifically:
 
 - Data is parsed from the page DOM in real time when the user clicks "Export to ICS."
-- At the times described above, the Software retrieves public teaching-week
+- On My Timetable document load, the Software retrieves public teaching-week
   dates from the fixed UOW academic calendar URL. The request contains no
   timetable data, student number, selected year, or other query data, and
   request credentials and cookies are omitted. Redirects are rejected, so the
@@ -49,11 +54,13 @@ All collected timetable data is used **solely** to generate an ICS calendar file
   flow. Chromium-based browser extension builds use the `chrome.downloads`
   API; Firefox, Safari, and the userscript use a temporary in-memory Blob
   download link. The remote academic calendar response is not saved as a file.
-- The academic calendar response, validated dates, and available-year list are
-  kept only in browser memory while the extension popup or active userscript
-  interaction needs them. Timetable data is kept only for the current export.
-  **No data is written to extension or userscript storage, cached for later
-  sessions, or otherwise persisted** by the Software.
+- The validated dates and available-year list are kept only in browser memory
+  for the life of the current My Timetable document. The raw public-page HTML
+  is released after validation. Timetable data is kept only for the current
+  export. **No data is written to extension or userscript storage, cached for
+  later sessions, or otherwise persisted** by the Software. The downloaded
+  `.ics` file is the user-requested output and remains wherever the user saves
+  it until the user deletes it.
 - If the online academic calendar is unavailable or invalid, or no complete
   year is available, the export stops with an error rather than guessing
   dates.
@@ -72,19 +79,19 @@ networking details, and request time.
 Timetable parsing, academic-date parsing, and ICS generation all happen locally
 within the browser. The remote response is treated as untrusted data and is
 validated before use; remotely supplied code is never executed. No timetable
-or academic calendar data is persisted beyond the popup or active interaction
-that needs it. The exported `.ics` file includes no identifiers about the
-student other than the timetable details needed for its calendar events.
+or academic calendar data is put in extension or userscript storage. The
+exported `.ics` file includes no identifiers about the student other than the
+timetable details needed for its calendar events.
 
 ## Permissions
 
 | Permission | Purpose |
 |---|---|
-| `activeTab` (browser extension packages) | Access the current SOLS timetable page when the user clicks the extension icon, to read class information from the page. |
+| `activeTab` (browser extension packages) | Identify and communicate with the current SOLS timetable tab when the user opens the extension popup. Timetable rows are read only after the user clicks Export. |
 | `downloads` (Chromium package only) | Save only the locally generated ICS calendar file to the user's device via Chrome's local download flow. Firefox, Safari, and the userscript use a temporary in-memory Blob link and do not request this permission. |
 | Host access to the specific SOLS timetable URL | Run extension content scripts or the userscript only on `https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable*` to parse the timetable HTML. |
-| Host access to `https://www.uow.edu.au/*` (browser extension packages) | Allow the Chromium, Firefox, and Safari extension pages to make the fixed request to `https://www.uow.edu.au/student/dates/`. No content script is run on UOW's public website. |
-| Tampermonkey `GM_xmlhttpRequest` and `@connect www.uow.edu.au` | Allow Tampermonkey to retrieve that same public academic calendar page despite browser cross-origin restrictions. The userscript's execution scope remains limited to the exact SOLS timetable URL. |
+| Host access to `https://www.uow.edu.au/*` (browser extension packages) | Allow the Chromium, Firefox, and Safari background context to make the fixed request to `https://www.uow.edu.au/student/dates/` when My Timetable loads. No content script is run on UOW's public website. |
+| Tampermonkey `GM_xmlhttpRequest` and `@connect www.uow.edu.au` | Allow Tampermonkey to retrieve that same public academic calendar page when My Timetable loads despite browser cross-origin restrictions. The userscript's execution scope remains limited to the exact SOLS timetable URL. |
 
 ## Limited Use Disclosure
 

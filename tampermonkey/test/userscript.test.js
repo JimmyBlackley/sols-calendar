@@ -253,16 +253,30 @@ async function interactWithYearControlAndWait(window) {
     throw new Error('Timed out waiting for the academic-year options');
 }
 
+async function waitForAcademicYearLoad(window) {
+    const button = window.document.querySelector('#sols-calendar-export button');
+    const status = window.document.querySelector('.sols-calendar-status');
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (!button.disabled && status.dataset.state !== 'working') {
+            return;
+        }
+    }
+
+    throw new Error('Timed out waiting for the automatic academic-year load');
+}
+
 function getICS(blobs) {
     assert.equal(blobs.length, 1);
     return blobs[0].parts.join('');
 }
 
 test('metadata keeps execution page-scoped and grants only the UOW calendar request', () => {
-    assert.match(userscript, /@version\s+1\.1\.1/);
-    assert.equal(packageManifest.version, '1.1.1');
-    assert.equal(packageLock.version, '1.1.1');
-    assert.equal(packageLock.packages[''].version, '1.1.1');
+    assert.match(userscript, /@version\s+1\.1\.2/);
+    assert.equal(packageManifest.version, '1.1.2');
+    assert.equal(packageLock.version, '1.1.2');
+    assert.equal(packageLock.packages[''].version, '1.1.2');
     assert.match(
         userscript,
         /@match\s+https:\/\/solss\.uow\.edu\.au\/sid\/sols_tutorial_enrolment\.my_timetable\*/
@@ -279,7 +293,7 @@ test('metadata keeps execution page-scoped and grants only the UOW calendar requ
     assert.doesNotMatch(userscript, /BUNDLED_ACADEMIC|20\d{2}-\d{2}-\d{2}/);
 });
 
-test('injects a SOLS-style panel and rejects synthetic page events', async () => {
+test('injects a SOLS-style panel and automatically requests academic years once', async () => {
     const { dom, downloads, requests, window } = createEnvironment();
     const panel = window.document.getElementById('sols-calendar-export');
     const timetable = window.document.getElementById('mobile-version');
@@ -289,6 +303,10 @@ test('injects a SOLS-style panel and rejects synthetic page events', async () =>
     assert(panel.classList.contains('panel-default'));
     assert.equal(panel.nextElementSibling, timetable);
     assert.equal(panel.querySelector('button').textContent, 'Export to ICS');
+    assert.match(
+        panel.querySelector('.sols-calendar-disclaimer').textContent,
+        /Unofficial independent tool.*not affiliated with.*UOW/
+    );
 
     const yearControl = panel.querySelector('#sols-calendar-export-year');
     assert.equal(yearControl.tagName, 'SELECT');
@@ -299,23 +317,30 @@ test('injects a SOLS-style panel and rejects synthetic page events', async () =>
         [['', 'Load from UOW…']]
     );
     assert.equal(window.getComputedStyle(panel.querySelector('button')).marginBottom, '0px');
-    assert.equal(requests.length, 0);
+    assert.equal(requests.length, 1);
+    assert.equal(yearControl.disabled, true);
+    assert.equal(panel.querySelector('button').disabled, true);
 
     yearControl.focus();
     yearControl.click();
     panel.querySelector('button').click();
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(requests.length, 0);
+    await waitForAcademicYearLoad(window);
+    assert.equal(requests.length, 1);
     assert.equal(downloads.length, 0);
+    assert.equal(
+        panel.querySelector('.sols-calendar-status').textContent,
+        'Select an academic year'
+    );
 
     window.eval(userscript);
     assert.equal(window.document.querySelectorAll('#sols-calendar-export').length, 1);
     assert.equal(window.document.querySelectorAll('#sols-calendar-export-style').length, 1);
+    assert.equal(requests.length, 1);
 
     dom.window.close();
 });
 
-test('loads selectable years from complete standard sessions on first year-control interaction', async () => {
+test('loads selectable years from complete standard sessions when the panel mounts', async () => {
     const noisyAcademicCalendarHtml = validAcademicCalendarHtml.replace(
         '<ul class="tabs">',
         `<p>First enrolment date: 24 Nov 2025</p>
@@ -327,8 +352,8 @@ test('loads selectable years from complete standard sessions on first year-contr
         academicCalendarHtml: noisyAcademicCalendarHtml
     });
 
-    assert.equal(requests.length, 0);
-    await interactWithYearControlAndWait(window);
+    assert.equal(requests.length, 1);
+    await waitForAcademicYearLoad(window);
 
     const yearControl = window.document.querySelector('#sols-calendar-export-year');
     assert.equal(requests.length, 1);
@@ -350,7 +375,7 @@ test('loads selectable years from complete standard sessions on first year-contr
 test('defaults to the earliest future year when the current year is unavailable', async () => {
     const { dom, window } = createEnvironment({ currentYear: 2025 });
 
-    await interactWithYearControlAndWait(window);
+    await waitForAcademicYearLoad(window);
 
     assert.equal(
         window.document.querySelector('#sols-calendar-export-year').value,
@@ -362,7 +387,7 @@ test('defaults to the earliest future year when the current year is unavailable'
 test('lists only-past years without selecting one and exports an explicitly selected past year', async () => {
     const { blobs, dom, downloads, window } = createEnvironment({ currentYear: 2031 });
 
-    await interactWithYearControlAndWait(window);
+    await waitForAcademicYearLoad(window);
 
     const yearControl = window.document.querySelector('#sols-calendar-export-year');
     assert.deepEqual(
@@ -386,22 +411,29 @@ test('lists only-past years without selecting one and exports an explicitly sele
     dom.window.close();
 });
 
-test('uses valid live UOW dates and sends a fixed anonymous request before parsing', async () => {
+test('reuses the automatic in-flight request when Export is clicked', async () => {
     let requestObservedWhileLoading = false;
+    let completeRequest;
     const environment = createEnvironment({
         gmHandler(details, window) {
             requestObservedWhileLoading =
                 window.document.querySelector('.sols-calendar-status').textContent
                 === 'Loading UOW academic calendar…';
-            details.onload(successfulResponse());
+            completeRequest = () => details.onload(successfulResponse());
         }
     });
     const { blobs, dom, downloads, requests, revoked, window } = environment;
 
-    await clickExportAndWait(window);
+    assert.equal(requests.length, 1);
+    const exportPromise = clickExportAndWait(window);
+    await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(requestObservedWhileLoading, true);
     assert.equal(requests.length, 1);
+    assert.equal(downloads.length, 0);
+    completeRequest();
+    await exportPromise;
+
     const request = requests[0];
     assert.equal(request.method, 'GET');
     assert.equal(request.url, keyDatesUrl);
@@ -443,7 +475,7 @@ test('uses valid live UOW dates and sends a fixed anonymous request before parsi
 
 test('uses live 2027 teaching periods', async () => {
     const { blobs, dom, window } = createEnvironment();
-    await interactWithYearControlAndWait(window);
+    await waitForAcademicYearLoad(window);
     window.document.querySelector('#sols-calendar-export-year').value = '2027';
 
     await clickExportAndWait(window);
@@ -637,7 +669,7 @@ test('accepts singular or plural week labels with ordinary spacing variation', a
     dom.window.close();
 });
 
-test('blocks a failed request without caching the failure and succeeds on retry', async () => {
+test('does not cache an automatic failure and succeeds on trusted Export retry', async () => {
     let attempt = 0;
     const environment = createEnvironment({
         gmHandler(details) {
@@ -651,7 +683,7 @@ test('blocks a failed request without caching the failure and succeeds on retry'
     });
     const { blobs, dom, downloads, requests, window } = environment;
 
-    await clickExportAndWait(window);
+    await waitForAcademicYearLoad(window);
 
     assert.equal(requests.length, 1);
     assert.equal(blobs.length, 0);
@@ -670,6 +702,35 @@ test('blocks a failed request without caching the failure and succeeds on retry'
         window.document.querySelector('.sols-calendar-status').dataset.state,
         'success'
     );
+
+    dom.window.close();
+});
+
+test('does not loop after automatic failure or retry from synthetic page events', async () => {
+    const { blobs, dom, downloads, requests, window } = createEnvironment({
+        gmHandler(details) {
+            details.onerror();
+        }
+    });
+
+    await waitForAcademicYearLoad(window);
+    const panel = window.document.getElementById('sols-calendar-export');
+    const yearControl = panel.querySelector('#sols-calendar-export-year');
+    const button = panel.querySelector('button');
+
+    assert.equal(requests.length, 1);
+    assert.equal(yearControl.options[0].textContent, 'Retry loading from UOW…');
+    assert.equal(panel.querySelector('.sols-calendar-status').dataset.state, 'error');
+
+    await new Promise((resolve) => setImmediate(resolve));
+    yearControl.focus();
+    yearControl.click();
+    button.click();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(requests.length, 1);
+    assert.equal(blobs.length, 0);
+    assert.equal(downloads.length, 0);
 
     dom.window.close();
 });
@@ -780,7 +841,7 @@ for (const [name, overrides] of invalidResponseCases) {
 test('blocks a year that was not exposed by the validated UOW options', async () => {
     const { blobs, dom, downloads, errors, window } = createEnvironment();
     const yearControl = window.document.querySelector('#sols-calendar-export-year');
-    await interactWithYearControlAndWait(window);
+    await waitForAcademicYearLoad(window);
     yearControl.appendChild(new window.Option('2030', '2030'));
     yearControl.value = '2030';
 
@@ -882,19 +943,22 @@ test('rejects an excessive teaching-week range before expanding it', async () =>
     dom.window.close();
 });
 
-test('does not retain a fetched calendar after an export completes', async () => {
+test('reuses one successful page-memory result for control use and repeated exports', async () => {
     const { dom, downloads, requests, window } = createEnvironment();
+    const yearControl = window.document.querySelector('#sols-calendar-export-year');
 
+    await waitForAcademicYearLoad(window);
+    await invokeTrustedListeners(window, yearControl, 'click');
     await clickExportAndWait(window);
     await clickExportAndWait(window);
 
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 1);
     assert.equal(downloads.length, 2);
 
     dom.window.close();
 });
 
-test('retries from Export after loading years through the select failed', async () => {
+test('retries a failed automatic load from a trusted year-control interaction', async () => {
     let attempt = 0;
     const { blobs, dom, downloads, requests, window } = createEnvironment({
         gmHandler(details) {
@@ -907,13 +971,24 @@ test('retries from Export after loading years through the select failed', async 
         }
     });
 
-    await interactWithYearControlAndWait(window);
+    await waitForAcademicYearLoad(window);
     assert.equal(requests.length, 1);
     assert.equal(downloads.length, 0);
     assert.equal(blobs.length, 0);
     assert.equal(
         window.document.querySelector('.sols-calendar-status').dataset.state,
         'error'
+    );
+
+    await interactWithYearControlAndWait(window);
+    assert.equal(requests.length, 2);
+    assert.equal(downloads.length, 0);
+    assert.deepEqual(
+        Array.from(
+            window.document.querySelector('#sols-calendar-export-year').options,
+            (option) => option.value
+        ),
+        ['2026', '2027']
     );
 
     await clickExportAndWait(window);

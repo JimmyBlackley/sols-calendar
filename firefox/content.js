@@ -1,7 +1,46 @@
 /**
- * Content script for SOLS Timetable to ICS Chrome Extension.
- * Parses the mobile list view of the "My Timetable" page.
+ * Content script for SOLS Timetable to ICS.
+ * Prefetches public UOW academic dates and parses the local timetable on demand.
  */
+
+const extensionRuntime = typeof browser === 'undefined'
+    ? chrome.runtime
+    : browser.runtime;
+let prefetchedAcademicCalendar = null;
+let academicCalendarRequest = null;
+
+function loadAcademicCalendar() {
+    if (prefetchedAcademicCalendar) {
+        return Promise.resolve(prefetchedAcademicCalendar);
+    }
+    if (academicCalendarRequest) {
+        return academicCalendarRequest;
+    }
+
+    academicCalendarRequest = extensionRuntime.sendMessage({
+        action: 'loadAcademicCalendarSource'
+    }).then((response) => {
+        if (response?.error) {
+            throw new Error(response.error);
+        }
+        if (
+            typeof response?.source?.html !== 'string'
+            || response.source.url !== ACADEMIC_CALENDAR_URL
+        ) {
+            throw new Error('Academic calendar response was invalid');
+        }
+
+        prefetchedAcademicCalendar = parseAcademicCalendarHtml(
+            response.source.html,
+            response.source.url
+        );
+        return prefetchedAcademicCalendar;
+    }).finally(() => {
+        academicCalendarRequest = null;
+    });
+
+    return academicCalendarRequest;
+}
 
 /**
  * Parse the mobile list view to extract timetable events.
@@ -170,13 +209,28 @@ function detectSession(subjectCode) {
     return null;
 }
 
-// Listen for messages from the popup
-browser.runtime.onMessage.addListener((request, sender) => {
+// Listen for messages from the popup.
+extensionRuntime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'parseTimetable') {
         try {
-            return Promise.resolve({ events: parseTimetable() });
+            sendResponse({ events: parseTimetable() });
         } catch (error) {
-            return Promise.resolve({ error: error.message });
+            sendResponse({ error: error.message });
         }
+        return false;
     }
+
+    if (request.action === 'getAcademicCalendar') {
+        loadAcademicCalendar()
+            .then((calendar) => sendResponse({ calendar }))
+            .catch((error) => sendResponse({ error: error.message }));
+        return true;
+    }
+
+    return false;
+});
+
+// Start one fixed, credentialless Key Dates request when My Timetable loads.
+loadAcademicCalendar().catch((error) => {
+    console.error('SOLS Calendar academic-date prefetch error:', error);
 });

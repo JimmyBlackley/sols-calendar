@@ -22,6 +22,7 @@
 		9022DDCB3017269000778CD8 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 9022DDC23017269000778CD8 /* manifest.json */; };
 		9022DDCC3017269000778CD8 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 9022DDC33017269000778CD8 /* content.js */; };
 		9022DDCD3017269000778CD8 /* calendar.js in Resources */ = {isa = PBXBuildFile; fileRef = 9022DDC43017269000778CD8 /* calendar.js */; };
+		A11200013017269000778CD8 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = A11200023017269000778CD8 /* background.js */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 		9022DDC23017269000778CD8 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = Resources/manifest.json; sourceTree = "<group>"; };
 		9022DDC33017269000778CD8 /* content.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = content.js; path = Resources/content.js; sourceTree = "<group>"; };
 		9022DDC43017269000778CD8 /* calendar.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = calendar.js; path = Resources/calendar.js; sourceTree = "<group>"; };
+		A11200023017269000778CD8 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = background.js; path = Resources/background.js; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +141,7 @@
 				9022DDC23017269000778CD8 /* manifest.json */,
 				9022DDC33017269000778CD8 /* content.js */,
 				9022DDC43017269000778CD8 /* calendar.js */,
+				A11200023017269000778CD8 /* background.js */,
 			);
 			name = Resources;
 			path = "SOLS Calendar Extension";
@@ -241,6 +244,7 @@
 			files = (
 				9022DDCC3017269000778CD8 /* content.js in Resources */,
 				9022DDCD3017269000778CD8 /* calendar.js in Resources */,
+				A11200013017269000778CD8 /* background.js in Resources */,
 				9022DDC53017269000778CD8 /* solscal128.png in Resources */,
 				9022DDCB3017269000778CD8 /* manifest.json in Resources */,
 				9022DDC83017269000778CD8 /* popup.html in Resources */,
@@ -429,7 +433,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -463,7 +467,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -501,7 +505,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,
@@ -540,7 +544,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-framework",
 					SafariServices,

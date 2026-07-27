@@ -327,7 +327,7 @@ function parseAcademicCalendarHtml(
     };
 }
 
-async function fetchAcademicCalendar(fetchImplementation = fetch, requestedYear = null) {
+async function fetchAcademicCalendarSource(fetchImplementation = fetch) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
 
@@ -359,10 +359,18 @@ async function fetchAcademicCalendar(fetchImplementation = fetch, requestedYear 
             throw new Error('UOW calendar response had an invalid size');
         }
 
-        return parseAcademicCalendarHtml(html, response.url, requestedYear);
+        return {
+            html,
+            url: response.url
+        };
     } finally {
         clearTimeout(timeout);
     }
+}
+
+async function fetchAcademicCalendar(fetchImplementation = fetch, requestedYear = null) {
+    const source = await fetchAcademicCalendarSource(fetchImplementation);
+    return parseAcademicCalendarHtml(source.html, source.url, requestedYear);
 }
 
 function getAvailableAcademicYears(calendar) {

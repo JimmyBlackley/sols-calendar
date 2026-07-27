@@ -5,6 +5,9 @@ A browser extension and userscript that exports your UOW SOLS timetable to an
 **Edge**, **Firefox**, and **Safari on macOS**; the userscript provides the same
 page-embedded export flow through Tampermonkey.
 
+> **Unofficial project:** This independent tool is not affiliated with,
+> endorsed by, or supported by the University of Wollongong.
+
 ## Install
 
 ### Step 1 — Download the extension
@@ -60,8 +63,7 @@ so there is no toolbar popup to open.
 
 The userscript runs only on the exact SOLS timetable URL. Its
 `GM_xmlhttpRequest` grant and `@connect www.uow.edu.au` declaration are used
-only to retrieve UOW's public academic dates after the user interacts with the
-academic-year control or starts an export.
+only to retrieve UOW's public academic dates once when My Timetable loads.
 See [`tampermonkey/README.md`](tampermonkey/README.md) for development and test
 instructions.
 
@@ -77,11 +79,10 @@ instructions.
 
 ## Academic calendar dates
 
-The browser extensions make a fixed `GET` request to
-`https://www.uow.edu.au/student/dates/` when their toolbar popup opens. The
-Tampermonkey userscript makes the same request only after the user interacts
-with its academic-year control or clicks **Export to ICS**; merely loading the
-SOLS timetable page does not trigger it.
+When the exact SOLS My Timetable document loads, each browser extension and the
+Tampermonkey userscript automatically makes one fixed `GET` request to
+`https://www.uow.edu.au/student/dates/`. This lets the academic-year selector
+be ready without a separate click.
 
 The request does not contain timetable data, a student number, the selected
 year, or other query data. Request credentials and cookies are omitted. As with
@@ -99,11 +100,27 @@ never applied silently.
 
 If the request fails, the response is invalid, or no complete academic year is
 available, the export stops with an error. The software does not guess dates.
-The response, validated dates, available-year list, and timetable data are
-kept only in browser memory while the extension popup or active userscript
-interaction needs them. They are never written to extension storage or
-otherwise persisted.
+There is no automatic retry loop. After a failure, opening the native popup or
+using the userscript's year control or Export button may retry the request.
+A successful validated calendar is reused for the life of the current
+My Timetable document. The raw response is released after parsing, and neither
+the calendar nor timetable is written to extension or userscript storage.
+Timetable rows are still read only when the user clicks Export.
 
+The generated ICS is intentionally saved to the user's device. UOW's
+[Acceptable Use of IT Resources Policy](https://policies.uow.edu.au/document/view-current.php?id=68)
+contains broad wording about storing University data on personally owned
+devices. It is unclear whether that wording is intended to cover a student's
+own minimal timetable export. Users who require a formal compliance
+determination should seek written guidance from UOW IMTS or Student Systems.
+This project does not provide legal or UOW policy advice.
+
+UOW's
+[Brand Approvals Procedure](https://policies.uow.edu.au/document/view-current.php?id=257)
+also regulates third-party use of the University name. The generic icon and
+unofficial-project disclaimer reduce the chance of mistaken endorsement, but
+they are not UOW approval. Anyone distributing the project publicly should
+seek UOW's written brand guidance.
 
 ## TODO:
 

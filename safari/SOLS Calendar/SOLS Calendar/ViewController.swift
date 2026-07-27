@@ -59,8 +59,13 @@ final class ViewController: NSViewController {
             font: .systemFont(ofSize: 13),
             color: .secondaryLabelColor
         )
+        let affiliation = makeLabel(
+            "Unofficial independent tool — not affiliated with, endorsed by, or supported by UOW.",
+            font: .systemFont(ofSize: 11.5),
+            color: .secondaryLabelColor
+        )
 
-        let headingText = NSStackView(views: [title, subtitle])
+        let headingText = NSStackView(views: [title, subtitle, affiliation])
         headingText.orientation = .vertical
         headingText.alignment = .leading
         headingText.spacing = 4
@@ -160,7 +165,7 @@ final class ViewController: NSViewController {
             font: .systemFont(ofSize: 13, weight: .semibold)
         )
         let privacyDetail = makeLabel(
-            "Your timetable stays local. Opening the extension retrieves public dates from UOW.",
+            "Your timetable stays local. Opening My Timetable retrieves public dates from UOW once.",
             font: .systemFont(ofSize: 12),
             color: .secondaryLabelColor
         )
@@ -226,7 +231,9 @@ final class ViewController: NSViewController {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
         label.textColor = color
+        label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
     }
 
