@@ -1,6 +1,9 @@
 # 📅 SOLS Timetable → ICS
 
-A browser extension that exports your UOW SOLS timetable to an `.ics` calendar file. Works on **Chrome**, **Edge**, and **Firefox**.
+A browser extension and userscript that exports your UOW SOLS timetable to an
+`.ics` calendar file. Browser extension packages are available for **Chrome**,
+**Edge**, **Firefox**, and **Safari on macOS**; the userscript provides the same
+page-embedded export flow through a compatible userscript manager.
 
 ## Install
 
@@ -28,10 +31,42 @@ A browser extension that exports your UOW SOLS timetable to an `.ics` calendar f
 
 > **Note:** Temporary add-ons in Firefox are removed when you close the browser. You'll need to reload it each session until the extension is published on [addons.mozilla.org](https://addons.mozilla.org).
 
+### Step 2c — Safari on macOS
+
+Safari is supplied as a macOS Xcode project until an App Store build is
+published. macOS 13 or later, Safari 18.1 or later, and Xcode 26 or later are
+required.
+
+1. Open `safari/SOLS Calendar/SOLS Calendar.xcodeproj` in Xcode.
+2. Select the project, then choose your Apple development team for the
+   **SOLS Calendar** app and extension targets. Change the bundle identifier
+   if your team already uses it.
+3. Select the **SOLS Calendar** scheme and your Mac, then click **Run**.
+4. In Safari, open **Settings > Extensions**, enable **SOLS Calendar**, and
+   allow access to `solss.uow.edu.au`.
+
+### Alternative — Tampermonkey userscript
+
+The userscript adds a SOLS-styled export panel directly above **My Timetable**,
+so there is no toolbar popup to open.
+
+1. Install a compatible userscript manager, such as Tampermonkey.
+2. Open the manager's script editor and install
+   `tampermonkey/sols-calendar.user.js`.
+3. Allow the manager to run the script on `solss.uow.edu.au`.
+4. Open SOLS **Timetable > My Timetable** and use the **Export to ICS** button
+   above the timetable.
+
+The userscript is limited to the exact SOLS timetable URL, requests no
+privileged userscript APIs, performs no network requests, and stores no
+timetable data. See [`tampermonkey/README.md`](tampermonkey/README.md) for
+development and test instructions.
+
 ## Use
 
 1. Log into [SOLS](https://solss.uow.edu.au/sid/sols_login_ctl.login) and go to **Timetable > My Timetable**
-2. Click the extension icon in the toolbar
+2. Click the extension icon in the toolbar, or use the page-embedded export
+   panel if you installed the userscript
 3. Select the academic year and click **Export to ICS**
 4. Choose where to save `UOW_class_timetable.ics`
 5. Import the file into Google Calendar, Apple Calendar, Outlook, etc.

@@ -1,0 +1,12 @@
+{
+  "name": "sols-calendar-userscript",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development and test environment for the SOLS Timetable to ICS userscript",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "29.1.1"
+  }
+}

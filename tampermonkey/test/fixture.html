@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>SOLS Calendar userscript fixture</title>
+    <style>
+        body {
+            color: #333;
+            font-family: Arial, sans-serif;
+            margin: 30px auto;
+            max-width: 960px;
+        }
+
+        .panel {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .panel-heading {
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            padding: 10px 15px;
+        }
+
+        .panel-body {
+            padding: 15px;
+        }
+
+        .form-control,
+        .btn {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 6px 12px;
+        }
+
+        .btn {
+            margin-bottom: 15px;
+        }
+
+        .btn-primary {
+            background: #337ab7;
+            border-color: #2e6da4;
+            color: #fff;
+        }
+
+        .list-group-item {
+            border: 1px solid #ddd;
+            padding: 10px 15px;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h1>My Timetable</h1>
+
+        <div class="alert alert-info">
+            This fixture contains synthetic timetable data.
+        </div>
+
+        <div class="hidden-md hidden-lg">
+            Scroll right to see all entries -&gt;
+        </div>
+
+        <div id="mobile-version" class="hidden-lg hidden-md">
+            <div class="list-group">
+                <div class="list-group-item" style="background: #00668d; color: #fff;">
+                    <h4 class="list-group-item-heading">Monday</h4>
+                </div>
+                <div class="list-group-item">
+                    <h4 class="list-group-item-heading">Lecture - CSIT101</h4>
+                    <p class="list-group-item-text">
+                        Lecture<br>
+                        Time: Mon, 10:00 - 12:00<br>
+                        Location: 25-107<br>
+                        Weeks: 1-13
+                    </p>
+                </div>
+                <div class="list-group-item">
+                    <h4 class="list-group-item-heading">Wednesday</h4>
+                </div>
+                <div class="list-group-item">
+                    <h4 class="list-group-item-heading">Enrolled - ISIT202</h4>
+                    <p class="list-group-item-text">
+                        Computer Lab:WG-OC-CL/04<br>
+                        Time: Wed, 14:30 - 16:30<br>
+                        Location: 3-126<br>
+                        Weeks: 3,5,7,9,11,13
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div id="desktop-version" class="hidden-xs hidden-sm table-responsive">
+            <table class="timetable">
+                <tbody>
+                    <tr>
+                        <td class="lecture">Autumn - CSIT101</td>
+                        <td class="enrolled">Spring - ISIT202</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script src="../sols-calendar.user.js"></script>
+</body>
+</html>

@@ -25,13 +25,10 @@ function parseTimetable() {
 
         const headingText = heading.textContent.trim();
 
-        // Day headers have a specific background style
-        if (item.style.backgroundColor || item.getAttribute('style')?.includes('background')) {
-            const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-            if (dayNames.includes(headingText)) {
-                currentDay = headingText;
-                continue;
-            }
+        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        if (dayNames.includes(headingText)) {
+            currentDay = headingText;
+            continue;
         }
 
         // This is a class entry
@@ -40,8 +37,7 @@ function parseTimetable() {
         const textEl = item.querySelector('p.list-group-item-text');
         if (!textEl) continue;
 
-        const text = textEl.innerHTML;
-        const textContent = textEl.textContent;
+        const textContent = textEl.textContent.replace(/\s+/g, ' ').trim();
 
         // Parse heading: "Lecture - ISIT307" or "Enrolled - CSIT242"
         const headingMatch = headingText.match(/^(Lecture|Enrolled)\s*-\s*(\w+)/i);
