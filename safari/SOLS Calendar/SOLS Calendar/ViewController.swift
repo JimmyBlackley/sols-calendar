@@ -160,7 +160,7 @@ final class ViewController: NSViewController {
             font: .systemFont(ofSize: 13, weight: .semibold)
         )
         let privacyDetail = makeLabel(
-            "Parsing and ICS generation happen locally in Safari. Nothing is uploaded.",
+            "Your timetable stays local. On export, Safari retrieves public dates from UOW.",
             font: .systemFont(ofSize: 12),
             color: .secondaryLabelColor
         )
@@ -176,7 +176,7 @@ final class ViewController: NSViewController {
         let privacyCard = makeCard(containing: privacyRow)
 
         let host = makeLabel(
-            "Only runs on solss.uow.edu.au · My Timetable",
+            "SOLS timetable only · Public dates: www.uow.edu.au",
             font: .monospacedSystemFont(ofSize: 10.5, weight: .regular),
             color: .tertiaryLabelColor
         )

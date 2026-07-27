@@ -3,7 +3,7 @@
 A browser extension and userscript that exports your UOW SOLS timetable to an
 `.ics` calendar file. Browser extension packages are available for **Chrome**,
 **Edge**, **Firefox**, and **Safari on macOS**; the userscript provides the same
-page-embedded export flow through a compatible userscript manager.
+page-embedded export flow through Tampermonkey.
 
 ## Install
 
@@ -43,24 +43,26 @@ required.
    if your team already uses it.
 3. Select the **SOLS Calendar** scheme and your Mac, then click **Run**.
 4. In Safari, open **Settings > Extensions**, enable **SOLS Calendar**, and
-   allow access to `solss.uow.edu.au`.
+   allow access to `solss.uow.edu.au` and `www.uow.edu.au`.
 
 ### Alternative — Tampermonkey userscript
 
 The userscript adds a SOLS-styled export panel directly above **My Timetable**,
 so there is no toolbar popup to open.
 
-1. Install a compatible userscript manager, such as Tampermonkey.
-2. Open the manager's script editor and install
+1. Install Tampermonkey build 6180 or later.
+2. Open Tampermonkey's script editor and install
    `tampermonkey/sols-calendar.user.js`.
-3. Allow the manager to run the script on `solss.uow.edu.au`.
+3. Allow Tampermonkey to run the script on `solss.uow.edu.au` and retrieve
+   public dates from `www.uow.edu.au`.
 4. Open SOLS **Timetable > My Timetable** and use the **Export to ICS** button
    above the timetable.
 
-The userscript is limited to the exact SOLS timetable URL, requests no
-privileged userscript APIs, performs no network requests, and stores no
-timetable data. See [`tampermonkey/README.md`](tampermonkey/README.md) for
-development and test instructions.
+The userscript runs only on the exact SOLS timetable URL. Its
+`GM_xmlhttpRequest` grant and `@connect www.uow.edu.au` declaration are used
+only to retrieve UOW's public academic dates when the user starts an export.
+See [`tampermonkey/README.md`](tampermonkey/README.md) for development and test
+instructions.
 
 ## Use
 
@@ -71,20 +73,46 @@ development and test instructions.
 4. Choose where to save `UOW_class_timetable.ics`
 5. Import the file into Google Calendar, Apple Calendar, Outlook, etc.
 
+## Academic calendar dates
 
-## Supported sessions (2026)
+When the user starts an export, the software makes a fixed `GET` request to
+`https://www.uow.edu.au/student/dates/` and reads the public teaching-week
+dates published there. This request does not contain timetable data, a student
+number, the selected year, or other query data. Request credentials and cookies
+are omitted. As with any ordinary web request, UOW still receives standard
+network metadata such as the user's IP address, browser networking details, and
+the time of the request.
 
-| Session | Week 1 | Mid-session break |
-|---------|--------|-------------------|
-| Autumn  | 2 Mar  | 20–24 Apr (after week 7) |
-| Spring  | 27 Jul | 28 Sep – 2 Oct (after week 9) |
-| Annual  | Autumn weeks 1–13, Spring weeks 14–26 |
+The returned HTML is handled only as data: bundled code parses the relevant
+academic-date tables, and no script or other code from the page is executed.
+The retrieved dates and the timetable remain in memory only for the current
+export and are not persisted.
+
+If the online request fails or its data does not pass validation, the software
+uses its bundled, verified dates for the same academic year. If neither the
+online source nor the bundled fallback supports the selected year, the export
+stops instead of guessing dates.
+
+The year field defaults to the current year but remains editable. Once UOW
+publishes a complete standard-session calendar for a future year, that year can
+be used without adding another hard-coded option to the extension.
+
+## Bundled fallback dates
+
+| Year | Session | Week 1 | Mid-session break |
+|------|---------|--------|-------------------|
+| 2026 | Autumn | 2 Mar | 20–24 Apr (after week 7) |
+| 2026 | Spring | 27 Jul | 28 Sep – 2 Oct (after week 9) |
+| 2027 | Autumn | 1 Mar | 19–23 Apr (after week 7) |
+| 2027 | Spring | 26 Jul | 27 Sep – 1 Oct (after week 9) |
+
+Annual fallback data contains the complete official Week 1–26 teaching
+segments for both years.
 
 
 ## TODO:
 
-- [ ] Add better support for annual subjects
-- [ ] Add support for polling mid session breaks automatically from uow website
+- [ ] Improve detection of annual-session timetable rows
 - [ ] Add support trimester based sessions
 - [ ] Add optional label events for week numbers
 - [ ] Work on tool to scan subject outlines for assessment dates

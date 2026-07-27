@@ -1,71 +1,90 @@
 /**
- * Popup script for SOLS Timetable to ICS Firefox Extension.
- * Sends a message to the content script → receives events → generates ICS → downloads.
+ * Firefox popup flow: load UOW's public academic dates, read the active SOLS
+ * timetable locally, generate the ICS in the extension popup, and download it.
  */
 
-document.getElementById('exportBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('exportBtn');
-    const status = document.getElementById('status');
-    const year = parseInt(document.getElementById('yearSelect').value, 10);
+const TIMETABLE_URL_PREFIX =
+    'https://solss.uow.edu.au/sid/sols_tutorial_enrolment.my_timetable';
+const DOWNLOAD_FILENAME = 'UOW_class_timetable.ics';
+const yearInput = document.getElementById('yearSelect');
 
-    btn.disabled = true;
-    status.className = 'status info';
-    status.innerHTML = '<span class="spinner"></span> Parsing timetable…';
+yearInput.value = String(new Date().getFullYear());
+
+function setStatus(status, state, message, showSpinner = false) {
+    status.className = `status ${state}`;
+    status.replaceChildren();
+
+    if (showSpinner) {
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner';
+        status.appendChild(spinner);
+    }
+    status.appendChild(document.createTextNode(message));
+}
+
+function downloadICS(ics) {
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = DOWNLOAD_FILENAME;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+document.getElementById('exportBtn').addEventListener('click', async () => {
+    const button = document.getElementById('exportBtn');
+    const status = document.getElementById('status');
+    const year = Number(yearInput.value);
+
+    button.disabled = true;
 
     try {
-        // Get the active tab
         const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-
-        if (!tab) {
-            throw new Error('No active tab found');
-        }
-
-        // Check if we're on the right page
-        if (!tab.url.includes('solss.uow.edu.au')) {
+        if (!tab?.url?.startsWith(TIMETABLE_URL_PREFIX)) {
             throw new Error('Please navigate to your SOLS My Timetable page first');
         }
 
-        // Send message to content script to parse the timetable
-        const response = await browser.tabs.sendMessage(tab.id, { action: 'parseTimetable' });
+        setStatus(status, 'info', 'Loading official UOW academic dates…', true);
+        const calendarResult = await loadAcademicCalendarForYear(year);
 
-        if (!response || !response.events || response.events.length === 0) {
-            throw new Error('No timetable entries found. Make sure you are on the My Timetable page.');
-        }
-
-        status.innerHTML = `<span class="spinner"></span> Generating ICS for ${response.events.length} classes…`;
-
-        // We need to load calendar.js functions. Since it's a content script,
-        // we need to ask the content script to generate the ICS too, or duplicate the logic.
-        // Let's inject and execute the generation in the content script context.
-        const icsResponse = await browser.tabs.sendMessage(tab.id, {
-            action: 'generateICS',
-            events: response.events,
-            year: year
+        setStatus(status, 'info', 'Reading timetable…', true);
+        const response = await browser.tabs.sendMessage(tab.id, {
+            action: 'parseTimetable'
         });
-
-        if (!icsResponse || !icsResponse.ics) {
-            throw new Error('Failed to generate ICS file');
+        if (response?.error) {
+            throw new Error(response.error);
+        }
+        if (!response?.events?.length) {
+            throw new Error(
+                'No timetable entries found. Make sure you are on the My Timetable page.'
+            );
         }
 
-        // Create a blob and trigger download via anchor click (Firefox
-        // can't use browser.downloads with popup-scoped blob URLs)
-        const blob = new Blob([icsResponse.ics], { type: 'text/calendar' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'UOW_class_timetable.ics';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        setStatus(
+            status,
+            'info',
+            `Generating ICS for ${response.events.length} classes…`,
+            true
+        );
+        const ics = generateICS(response.events, year, calendarResult.calendar);
+        downloadICS(ics);
 
-        status.className = 'status success';
-        status.textContent = `✓ Exported ${response.events.length} classes!`;
-    } catch (err) {
-        console.error('SOLS-Cal export error:', err);
-        status.className = 'status error';
-        status.textContent = `✗ ${err.message}`;
+        const sourceMessage = calendarResult.source === 'live'
+            ? 'using current UOW dates'
+            : `using bundled dates verified ${BUNDLED_CALENDAR_VERIFIED_DATE}`;
+        setStatus(
+            status,
+            'success',
+            `✓ Exported ${response.events.length} classes ${sourceMessage}.`
+        );
+    } catch (error) {
+        console.error('SOLS Calendar export error:', error);
+        setStatus(status, 'error', `✗ ${error.message}`);
     } finally {
-        btn.disabled = false;
+        button.disabled = false;
     }
 });

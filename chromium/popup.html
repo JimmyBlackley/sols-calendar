@@ -65,7 +65,7 @@
             margin-bottom: 6px;
         }
 
-        .field select {
+        .field input {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -74,23 +74,18 @@
             color: #fff;
             font-size: 13px;
             outline: none;
-            cursor: pointer;
+            cursor: text;
             transition: border-color 0.2s, background 0.2s;
         }
 
-        .field select:hover {
+        .field input:hover {
             border-color: rgba(255, 255, 255, 0.35);
             background: rgba(255, 255, 255, 0.12);
         }
 
-        .field select:focus {
+        .field input:focus {
             border-color: #4da6ff;
             background: rgba(255, 255, 255, 0.12);
-        }
-
-        .field select option {
-            background: #003366;
-            color: #fff;
         }
 
         .btn-export {
@@ -184,10 +179,9 @@
         </div>
 
         <div class="field">
-            <label>Academic Year</label>
-            <select id="yearSelect">
-                <option value="2026" selected>2026</option>
-            </select>
+            <label for="yearSelect">Academic Year</label>
+            <input id="yearSelect" type="number" min="2000" max="2100"
+                step="1" inputmode="numeric">
         </div>
 
         <button class="btn-export" id="exportBtn">
@@ -201,6 +195,7 @@
         <div class="status" id="status"></div>
     </div>
 
+    <script src="calendar.js"></script>
     <script src="popup.js"></script>
 </body>
 

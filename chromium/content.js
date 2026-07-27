@@ -11,40 +11,60 @@ function parseTimetable() {
     const events = [];
     const mobileView = document.querySelector('#mobile-version');
     if (!mobileView) {
-        console.error('SOLS-Cal: Could not find #mobile-version element');
-        return events;
+        throw new Error('Could not find the SOLS mobile timetable view');
     }
 
     const items = mobileView.querySelectorAll('.list-group-item');
     let currentDay = null;
+    const dayNames = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday'
+    ];
 
     for (const item of items) {
-        // Check if this is a day header
         const heading = item.querySelector('h4.list-group-item-heading');
-        if (!heading) continue;
+        const textEl = item.querySelector('p.list-group-item-text');
+        if (!heading) {
+            if (textEl && /\b(?:Time|Weeks):/i.test(textEl.textContent)) {
+                throw new Error('Could not read a SOLS class heading');
+            }
+            continue;
+        }
 
         const headingText = heading.textContent.trim();
-
-        const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         if (dayNames.includes(headingText)) {
             currentDay = headingText;
             continue;
         }
 
-        // This is a class entry
-        if (!currentDay) continue;
-
-        const textEl = item.querySelector('p.list-group-item-text');
-        if (!textEl) continue;
-
-        const textContent = textEl.textContent.replace(/\s+/g, ' ').trim();
-
         // Parse heading: "Lecture - ISIT307" or "Enrolled - CSIT242"
-        const headingMatch = headingText.match(/^(Lecture|Enrolled)\s*-\s*(\w+)/i);
-        if (!headingMatch) continue;
+        const headingMatch = headingText.match(
+            /^(Lecture|Enrolled)\s*-\s*(\w+)\s*$/i
+        );
+        const looksLikeClass = /^(Lecture|Enrolled)\b/i.test(headingText)
+            || (textEl && /\b(?:Time|Weeks):/i.test(textEl.textContent));
+        if (!headingMatch) {
+            if (looksLikeClass) {
+                throw new Error('Could not read a SOLS class heading');
+            }
+            continue;
+        }
 
         const type = headingMatch[1];
         const subjectCode = headingMatch[2];
+        if (!currentDay) {
+            throw new Error(`Could not determine the class day for ${subjectCode}`);
+        }
+        if (!textEl) {
+            throw new Error(`Could not read class details for ${subjectCode}`);
+        }
+
+        const textContent = textEl.textContent.replace(/\s+/g, ' ').trim();
 
         // Parse the text content for details
         // Format varies:
@@ -71,7 +91,9 @@ function parseTimetable() {
 
         // Extract time
         const timeMatch = textContent.match(/Time:\s*\w+,\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
-        if (!timeMatch) continue;
+        if (!timeMatch) {
+            throw new Error(`Could not read class time for ${subjectCode}`);
+        }
         const startTime = timeMatch[1];
         const endTime = timeMatch[2];
 
@@ -81,7 +103,9 @@ function parseTimetable() {
 
         // Extract weeks
         const weeksMatch = textContent.match(/Weeks:\s*(.+)/);
-        if (!weeksMatch) continue;
+        if (!weeksMatch) {
+            throw new Error(`Could not read teaching weeks for ${subjectCode}`);
+        }
         const weeks = weeksMatch[1].trim();
 
         // Determine session (Autumn/Spring/Annual) from the desktop table
@@ -110,16 +134,32 @@ function parseTimetable() {
 
 /**
  * Detect the session type for a subject by checking the desktop table.
- * Falls back to "Autumn" if not found.
+ * Returns null rather than guessing when SOLS does not expose the session.
  */
+function getSearchableCellText(element) {
+    const renderedText = typeof element.innerText === 'string'
+        ? element.innerText
+        : '';
+
+    const readNode = (node) => {
+        if (node.nodeType === 3) {
+            return node.textContent || '';
+        }
+        return ` ${Array.from(node.childNodes, readNode).join(' ')} `;
+    };
+    const structuredText = readNode(element);
+    return `${renderedText} ${structuredText}`.trim();
+}
+
 function detectSession(subjectCode) {
     // Search the desktop table for session info
     const desktopTable = document.querySelector('#desktop-version .timetable');
     if (desktopTable) {
         const cells = desktopTable.querySelectorAll('td.lecture, td.enrolled');
         for (const cell of cells) {
-            const text = cell.textContent;
-            if (text.includes(subjectCode)) {
+            const text = getSearchableCellText(cell);
+            const subjectTokens = text.toLowerCase().split(/\W+/);
+            if (subjectTokens.includes(subjectCode.toLowerCase())) {
                 if (/Annual/i.test(text)) return 'Annual';
                 if (/Spring/i.test(text)) return 'Spring';
                 if (/Autumn/i.test(text)) return 'Autumn';
@@ -127,27 +167,17 @@ function detectSession(subjectCode) {
         }
     }
 
-    // Also check mobile view
-    const mobileItems = document.querySelectorAll('#mobile-version .list-group-item p.list-group-item-text');
-    // The mobile view doesn't explicitly show the session, but the desktop does
-    // If we still haven't found it, just use the date
-    // ignore the current year, we only need the month for session:
-    const now = new Date();
-    const month = now.getMonth();
-    if (month >= 5 && month <= 11) {
-        return 'Spring';
-    }
-    return 'Autumn';
+    return null;
 }
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'parseTimetable') {
-        const events = parseTimetable();
-        sendResponse({ events });
-    } else if (request.action === 'generateICS') {
-        const ics = generateICS(request.events, request.year);
-        sendResponse({ ics });
+        try {
+            sendResponse({ events: parseTimetable() });
+        } catch (error) {
+            sendResponse({ error: error.message });
+        }
     }
-    return true;
+    return false;
 });
