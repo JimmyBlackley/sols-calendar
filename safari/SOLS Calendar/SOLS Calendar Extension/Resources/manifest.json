@@ -1,13 +1,6 @@
 {
     "manifest_version": 3,
-    "browser_specific_settings": {
-        "gecko": {
-            "id": "sols-calendar@jimmyblackley",
-            "strict_min_version": "127.0"
-        }
-    },
     "name": "SOLS Timetable to ICS",
-    "short_name": "SOLS Calendar",
     "version": "1.1.4",
     "author": "James Blackley",
     "description": "Unofficial tool to export your UOW SOLS timetable to a local ICS calendar file",
@@ -19,17 +12,20 @@
         "https://*.uow.edu.au/*"
     ],
     "icons": {
-        "64": "solscal.svg"
+        "32": "solscal32.png",
+        "64": "solscal64.png",
+        "128": "solscal128.png"
     },
     "action": {
         "default_popup": "popup.html",
-        "default_icon": "solscal.svg"
+        "default_icon": {
+            "32": "solscal32.png",
+            "64": "solscal64.png",
+            "128": "solscal128.png"
+        }
     },
     "background": {
-        "scripts": [
-            "calendar.js",
-            "background.js"
-        ]
+        "service_worker": "background.js"
     },
     "content_scripts": [
         {
@@ -42,5 +38,10 @@
             ],
             "run_at": "document_start"
         }
-    ]
+    ],
+    "browser_specific_settings": {
+        "safari": {
+            "strict_min_version": "18.1"
+        }
+    }
 }

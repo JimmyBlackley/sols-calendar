@@ -1,7 +1,46 @@
 /**
- * Content script for SOLS Timetable to ICS Chrome Extension.
- * Parses the mobile list view of the "My Timetable" page.
+ * Content script for SOLS Timetable to ICS.
+ * Prefetches public UOW academic dates and parses the local timetable on demand.
  */
+
+const extensionRuntime = typeof browser === 'undefined'
+    ? chrome.runtime
+    : browser.runtime;
+let prefetchedAcademicCalendar = null;
+let academicCalendarRequest = null;
+
+function loadAcademicCalendar() {
+    if (prefetchedAcademicCalendar) {
+        return Promise.resolve(prefetchedAcademicCalendar);
+    }
+    if (academicCalendarRequest) {
+        return academicCalendarRequest;
+    }
+
+    academicCalendarRequest = extensionRuntime.sendMessage({
+        action: 'loadAcademicCalendarSource'
+    }).then((response) => {
+        if (response?.error) {
+            throw new Error(response.error);
+        }
+        if (
+            typeof response?.source?.html !== 'string'
+            || response.source.url !== ACADEMIC_CALENDAR_URL
+        ) {
+            throw new Error('Academic calendar response was invalid');
+        }
+
+        prefetchedAcademicCalendar = parseAcademicCalendarHtml(
+            response.source.html,
+            response.source.url
+        );
+        return prefetchedAcademicCalendar;
+    }).finally(() => {
+        academicCalendarRequest = null;
+    });
+
+    return academicCalendarRequest;
+}
 
 /**
  * Parse the mobile list view to extract timetable events.
@@ -11,44 +50,60 @@ function parseTimetable() {
     const events = [];
     const mobileView = document.querySelector('#mobile-version');
     if (!mobileView) {
-        console.error('SOLS-Cal: Could not find #mobile-version element');
-        return events;
+        throw new Error('Could not find the SOLS mobile timetable view');
     }
 
     const items = mobileView.querySelectorAll('.list-group-item');
     let currentDay = null;
+    const dayNames = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday'
+    ];
 
     for (const item of items) {
-        // Check if this is a day header
         const heading = item.querySelector('h4.list-group-item-heading');
-        if (!heading) continue;
-
-        const headingText = heading.textContent.trim();
-
-        // Day headers have a specific background style
-        if (item.style.backgroundColor || item.getAttribute('style')?.includes('background')) {
-            const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-            if (dayNames.includes(headingText)) {
-                currentDay = headingText;
-                continue;
+        const textEl = item.querySelector('p.list-group-item-text');
+        if (!heading) {
+            if (textEl && /\b(?:Time|Weeks):/i.test(textEl.textContent)) {
+                throw new Error('Could not read a SOLS class heading');
             }
+            continue;
         }
 
-        // This is a class entry
-        if (!currentDay) continue;
-
-        const textEl = item.querySelector('p.list-group-item-text');
-        if (!textEl) continue;
-
-        const text = textEl.innerHTML;
-        const textContent = textEl.textContent;
+        const headingText = heading.textContent.trim();
+        if (dayNames.includes(headingText)) {
+            currentDay = headingText;
+            continue;
+        }
 
         // Parse heading: "Lecture - ISIT307" or "Enrolled - CSIT242"
-        const headingMatch = headingText.match(/^(Lecture|Enrolled)\s*-\s*(\w+)/i);
-        if (!headingMatch) continue;
+        const headingMatch = headingText.match(
+            /^(Lecture|Enrolled)\s*-\s*(\w+)\s*$/i
+        );
+        const looksLikeClass = /^(Lecture|Enrolled)\b/i.test(headingText)
+            || (textEl && /\b(?:Time|Weeks):/i.test(textEl.textContent));
+        if (!headingMatch) {
+            if (looksLikeClass) {
+                throw new Error('Could not read a SOLS class heading');
+            }
+            continue;
+        }
 
         const type = headingMatch[1];
         const subjectCode = headingMatch[2];
+        if (!currentDay) {
+            throw new Error(`Could not determine the class day for ${subjectCode}`);
+        }
+        if (!textEl) {
+            throw new Error(`Could not read class details for ${subjectCode}`);
+        }
+
+        const textContent = textEl.textContent.replace(/\s+/g, ' ').trim();
 
         // Parse the text content for details
         // Format varies:
@@ -75,7 +130,9 @@ function parseTimetable() {
 
         // Extract time
         const timeMatch = textContent.match(/Time:\s*\w+,\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
-        if (!timeMatch) continue;
+        if (!timeMatch) {
+            throw new Error(`Could not read class time for ${subjectCode}`);
+        }
         const startTime = timeMatch[1];
         const endTime = timeMatch[2];
 
@@ -85,7 +142,9 @@ function parseTimetable() {
 
         // Extract weeks
         const weeksMatch = textContent.match(/Weeks:\s*(.+)/);
-        if (!weeksMatch) continue;
+        if (!weeksMatch) {
+            throw new Error(`Could not read teaching weeks for ${subjectCode}`);
+        }
         const weeks = weeksMatch[1].trim();
 
         // Determine session (Autumn/Spring/Annual) from the desktop table
@@ -114,16 +173,32 @@ function parseTimetable() {
 
 /**
  * Detect the session type for a subject by checking the desktop table.
- * Falls back to "Autumn" if not found.
+ * Returns null rather than guessing when SOLS does not expose the session.
  */
+function getSearchableCellText(element) {
+    const renderedText = typeof element.innerText === 'string'
+        ? element.innerText
+        : '';
+
+    const readNode = (node) => {
+        if (node.nodeType === 3) {
+            return node.textContent || '';
+        }
+        return ` ${Array.from(node.childNodes, readNode).join(' ')} `;
+    };
+    const structuredText = readNode(element);
+    return `${renderedText} ${structuredText}`.trim();
+}
+
 function detectSession(subjectCode) {
     // Search the desktop table for session info
     const desktopTable = document.querySelector('#desktop-version .timetable');
     if (desktopTable) {
         const cells = desktopTable.querySelectorAll('td.lecture, td.enrolled');
         for (const cell of cells) {
-            const text = cell.textContent;
-            if (text.includes(subjectCode)) {
+            const text = getSearchableCellText(cell);
+            const subjectTokens = text.toLowerCase().split(/\W+/);
+            if (subjectTokens.includes(subjectCode.toLowerCase())) {
                 if (/Annual/i.test(text)) return 'Annual';
                 if (/Spring/i.test(text)) return 'Spring';
                 if (/Autumn/i.test(text)) return 'Autumn';
@@ -131,26 +206,31 @@ function detectSession(subjectCode) {
         }
     }
 
-    // Also check mobile view
-    const mobileItems = document.querySelectorAll('#mobile-version .list-group-item p.list-group-item-text');
-    // The mobile view doesn't explicitly show the session, but the desktop does
-    // If we still haven't found it, just use the date
-    // ignore the current year, we only need the month for session:
-    const now = new Date();
-    const month = now.getMonth();
-    if (month >= 5 && month <= 11) {
-        return 'Spring';
-    }
-    return 'Autumn';
+    return null;
 }
 
-// Listen for messages from the popup
-browser.runtime.onMessage.addListener((request, sender) => {
+// Listen for messages from the popup.
+extensionRuntime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'parseTimetable') {
-        const events = parseTimetable();
-        return Promise.resolve({ events });
-    } else if (request.action === 'generateICS') {
-        const ics = generateICS(request.events, request.year);
-        return Promise.resolve({ ics });
+        try {
+            sendResponse({ events: parseTimetable() });
+        } catch (error) {
+            sendResponse({ error: error.message });
+        }
+        return false;
     }
+
+    if (request.action === 'getAcademicCalendar') {
+        loadAcademicCalendar()
+            .then((calendar) => sendResponse({ calendar }))
+            .catch((error) => sendResponse({ error: error.message }));
+        return true;
+    }
+
+    return false;
+});
+
+// Start one fixed, credentialless Key Dates request when My Timetable loads.
+loadAcademicCalendar().catch((error) => {
+    console.error('SOLS Calendar academic-date prefetch error:', error);
 });

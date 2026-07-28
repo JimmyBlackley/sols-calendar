@@ -1,5 +1,5 @@
 /**
- * Chromium popup flow: load UOW's public academic dates, read the active SOLS
+ * Safari popup flow: load UOW's public academic dates, read the active SOLS
  * timetable locally, generate the ICS in the extension popup, and download it.
  */
 
@@ -113,6 +113,21 @@ async function initializeAcademicYears() {
     }
 }
 
+function downloadICS(ics) {
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = DOWNLOAD_FILENAME;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    // Revoking immediately can race Safari's download hand-off.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 exportButton.addEventListener('click', async () => {
     const year = Number(yearSelect.value);
 
@@ -149,18 +164,7 @@ exportButton.addEventListener('click', async () => {
             true
         );
         const ics = generateICS(response.events, year, academicCalendar);
-        const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-
-        try {
-            await chrome.downloads.download({
-                url,
-                filename: DOWNLOAD_FILENAME,
-                saveAs: true
-            });
-        } finally {
-            URL.revokeObjectURL(url);
-        }
+        downloadICS(ics);
 
         setStatus(
             status,
